@@ -5,6 +5,7 @@ Local-only bridge between Codex MCP tools and a trusted FoundryVTT GM client.
 ## Shape
 
 - `src/server.js` runs the Codex MCP server over stdio and a localhost WebSocket endpoint for Foundry.
+- `src/tool-registry.js` is the shared tool registry used by both MCP entrypoints.
 - `module/` is the Foundry module installed into the local Foundry data folder.
 - The MCP server requires `CODEX_FOUNDRY_BRIDGE_TOKEN`.
 - The Foundry module connects for GM users with a configured local token, then the daemon only activates full tools for worlds explicitly authorized by the GM.
@@ -62,8 +63,12 @@ CodexFoundryBridge.authorizationStatus()
 Useful MCP/daemon tools:
 
 - `foundry_status` shows trusted and pending sessions plus the trusted-world config path.
+- `bridge_self_check` reports daemon, module, version, runtime, path, log, and trusted-world health.
+- `list_bridge_tools` returns the shared tool registry with risk flags and checksum.
 - `list_trusted_worlds` lists authorized world ids and metadata.
 - `revoke_trusted_world` removes a world from the trusted list.
+- `list_compendium_packs`, `search_compendium`, and `get_compendium_document` read live Foundry compendium APIs without scraping pack storage.
+- `summarize_actor` and `summarize_scene` provide compact read-only D35E/world summaries.
 
 If the module cannot be enabled from the Foundry UI, close Foundry completely and run:
 
@@ -80,4 +85,5 @@ That helper refuses to run while Foundry is open and backs up `settings.db` firs
 - Secrets, hashes, license/admin keys, and token-like fields are redacted from tool results.
 - `run_gm_script` requires `dangerous=true`.
 - Live-world tools require a connected, trusted GM session; unknown worlds stay pending until authorized by the GM.
+- Read-only intelligence tools require the same trusted GM session as other live-world inspection tools.
 - Runtime diagnostics are observational only; they do not change Foundry behavior or world data.

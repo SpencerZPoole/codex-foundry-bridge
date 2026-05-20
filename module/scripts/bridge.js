@@ -1,5 +1,5 @@
 const MODULE_ID = "codex-foundry-bridge";
-const MODULE_VERSION = "0.2.2";
+const MODULE_VERSION = "0.2.3";
 const DEFAULT_URL = "ws://127.0.0.1:30123/foundry";
 const RECONNECT_MS = 5000;
 const MAX_RESULT_CHARS = 1_000_000;
@@ -361,6 +361,251 @@ function getDocument(collectionName, documentId) {
   return document;
 }
 
+function boundedLimit(value, fallback = 25, max = 100) {
+  return Math.min(Math.max(Number(value) || fallback, 1), max);
+}
+
+function stripHtml(value) {
+  const text = String(value ?? "");
+  if (!text) return "";
+  return compactString(
+    text
+      .replace(/<[^>]*>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&quot;/gi, "\"")
+      .replace(/&#39;/g, "'")
+      .replace(/\s+/g, " ")
+      .trim(),
+    1200
+  );
+}
+
+function packLabel(pack) {
+  return pack.metadata?.label ?? pack.title ?? pack.collection;
+}
+
+function packSummary(pack) {
+  return {
+    collection: pack.collection,
+    documentName: pack.documentName,
+    label: packLabel(pack),
+    packageName: pack.metadata?.packageName ?? null,
+    packageType: pack.metadata?.packageType ?? null,
+    locked: pack.locked === true,
+    indexed: Boolean(pack.index?.size),
+    indexSize: pack.index?.size ?? 0
+  };
+}
+
+function getPack(packId) {
+  const normalized = String(packId ?? "").toLowerCase();
+  if (!normalized) throw new Error("pack is required");
+  const pack = game.packs.get(packId)
+    ?? Array.from(game.packs.values()).find((candidate) => {
+      return candidate.collection?.toLowerCase() === normalized
+        || packLabel(candidate)?.toLowerCase() === normalized
+        || candidate.metadata?.name?.toLowerCase() === normalized;
+    });
+  if (!pack) throw new Error(`Compendium pack not found: ${packId}`);
+  return pack;
+}
+
+function listCompendiumPacks(args = {}) {
+  const packageName = args.packageName ? String(args.packageName).toLowerCase() : null;
+  const documentName = args.documentName ? String(args.documentName).toLowerCase() : null;
+  const query = args.query ? String(args.query).toLowerCase() : null;
+  const limit = boundedLimit(args.limit, 100, 250);
+  const packs = [];
+
+  for (const pack of game.packs.values()) {
+    const summary = packSummary(pack);
+    const haystack = JSON.stringify(summary).toLowerCase();
+    if (packageName && String(summary.packageName ?? "").toLowerCase() !== packageName) continue;
+    if (documentName && String(summary.documentName ?? "").toLowerCase() !== documentName) continue;
+    if (query && !haystack.includes(query)) continue;
+    packs.push(summary);
+    if (packs.length >= limit) break;
+  }
+
+  return packs.sort((a, b) => a.collection.localeCompare(b.collection));
+}
+
+function requestedIndexFields(args = {}) {
+  const fields = Array.isArray(args.fields) ? args.fields.filter((field) => typeof field === "string") : [];
+  const defaults = ["type", "img", "system.description.value", "system.level", "system.school", "system.cr", "system.details.cr"];
+  return [...new Set([...defaults, ...fields])];
+}
+
+async function searchCompendium(args = {}) {
+  const query = String(args.query ?? "").toLowerCase();
+  const documentName = args.documentName ? String(args.documentName).toLowerCase() : null;
+  const type = args.type ? String(args.type).toLowerCase() : null;
+  const limit = boundedLimit(args.limit, 25, 100);
+  const packs = args.pack ? [getPack(args.pack)] : Array.from(game.packs.values());
+  const results = [];
+
+  for (const pack of packs) {
+    if (documentName && String(pack.documentName ?? "").toLowerCase() !== documentName) continue;
+    const index = await pack.getIndex({ fields: requestedIndexFields(args) });
+    const entries = Array.from(index.values ? index.values() : index);
+    for (const entry of entries) {
+      if (type && String(entry.type ?? "").toLowerCase() !== type) continue;
+      const haystack = JSON.stringify({
+        id: entry._id,
+        name: entry.name,
+        type: entry.type,
+        img: entry.img,
+        system: entry.system
+      }).toLowerCase();
+      if (query && !haystack.includes(query)) continue;
+      results.push({
+        pack: pack.collection,
+        packLabel: packLabel(pack),
+        documentName: pack.documentName,
+        id: entry._id,
+        name: entry.name,
+        type: entry.type ?? null,
+        img: entry.img ?? null
+      });
+      if (results.length >= limit) return results;
+    }
+  }
+
+  return results;
+}
+
+async function getCompendiumDocument(args = {}) {
+  const pack = getPack(args.pack);
+  const idOrName = String(args.id ?? "");
+  let entryId = idOrName;
+  let document = null;
+
+  try {
+    document = await pack.getDocument(entryId);
+  } catch {
+    document = null;
+  }
+
+  if (!document) {
+    const index = await pack.getIndex();
+    const entries = Array.from(index.values ? index.values() : index);
+    const entry = entries.find((item) => item._id === idOrName || item.name === idOrName);
+    if (entry) {
+      entryId = entry._id;
+      document = await pack.getDocument(entryId);
+    }
+  }
+
+  if (!document) throw new Error(`No document found in ${pack.collection}: ${idOrName}`);
+  if (args.summarize === true) return summarizeDocument(document, { pack: pack.collection });
+  return toPlainDocument(document, { includeEmbedded: document instanceof Scene });
+}
+
+function itemDescription(item) {
+  return stripHtml(item.system?.description?.value ?? item.system?.description ?? item.description ?? "");
+}
+
+function summarizeItem(item) {
+  const source = item.toObject ? item.toObject() : item;
+  return redact({
+    id: source._id ?? item.id,
+    name: source.name ?? item.name,
+    type: source.type ?? item.type,
+    img: source.img ?? item.img,
+    quantity: source.system?.quantity,
+    weight: source.system?.weight,
+    price: source.system?.price,
+    description: itemDescription(source)
+  });
+}
+
+function classSummary(actor) {
+  const classes = actor.system?.details?.classes ?? {};
+  return Object.entries(classes).map(([key, value]) => ({
+    key,
+    name: value?.name ?? key,
+    level: value?.level ?? null,
+    hd: value?.hd ?? null,
+    bab: value?.bab ?? null
+  }));
+}
+
+function summarizeActorDocument(actor, { includeItems = false, itemLimit = 20, pack = null } = {}) {
+  const items = actor.items ? Array.from(actor.items.values()) : [];
+  const limit = boundedLimit(itemLimit, 20, 100);
+  return redact({
+    pack,
+    id: actor.id,
+    uuid: actor.uuid,
+    name: actor.name,
+    type: actor.type,
+    img: actor.img,
+    hp: actor.system?.attributes?.hp ?? null,
+    ac: actor.system?.attributes?.ac ?? null,
+    abilities: actor.system?.abilities ?? null,
+    saves: actor.system?.attributes?.savingThrows ?? actor.system?.attributes?.saves ?? null,
+    classes: classSummary(actor),
+    itemCount: items.length,
+    items: includeItems ? items.slice(0, limit).map(summarizeItem) : undefined
+  });
+}
+
+function summarizeSceneDocument(scene, { includeTokens = false, tokenLimit = 50, pack = null } = {}) {
+  const tokens = scene.tokens ? Array.from(scene.tokens.values()) : [];
+  const limit = boundedLimit(tokenLimit, 50, 200);
+  return redact({
+    pack,
+    id: scene.id,
+    uuid: scene.uuid,
+    name: scene.name,
+    active: scene.active,
+    navigation: scene.navigation,
+    dimensions: scene.dimensions,
+    grid: scene.grid,
+    background: scene.background?.src ?? scene.img ?? null,
+    counts: {
+      tokens: tokens.length,
+      walls: scene.walls?.size ?? 0,
+      lights: scene.lights?.size ?? 0,
+      sounds: scene.sounds?.size ?? 0,
+      tiles: scene.tiles?.size ?? 0,
+      drawings: scene.drawings?.size ?? 0,
+      notes: scene.notes?.size ?? 0
+    },
+    tokens: includeTokens
+      ? tokens.slice(0, limit).map((token) => ({
+          id: token.id,
+          name: token.name,
+          actorId: token.actorId,
+          actorName: token.actor?.name ?? null,
+          hidden: token.hidden,
+          x: token.x,
+          y: token.y,
+          elevation: token.elevation,
+          disposition: token.disposition
+        }))
+      : undefined
+  });
+}
+
+function summarizeDocument(document, options = {}) {
+  if (document instanceof Actor) return summarizeActorDocument(document, options);
+  if (document instanceof Scene) return summarizeSceneDocument(document, options);
+  if (document instanceof Item) return summarizeItem(document);
+  const plain = toPlainDocument(document);
+  return {
+    pack: options.pack ?? null,
+    id: plain?._id ?? document.id,
+    name: plain?.name ?? plain?.title ?? document.name,
+    type: plain?.type ?? document.documentName,
+    img: plain?.img ?? null,
+    description: stripHtml(plain?.system?.description?.value ?? plain?.content ?? "")
+  };
+}
+
 function safeEvalScript(source, context = {}) {
   const asyncFunction = Object.getPrototypeOf(async function () {}).constructor;
   return asyncFunction(
@@ -481,6 +726,32 @@ async function handleBridgeRequest(method, args = {}) {
       const scene = args.id ? game.scenes.get(args.id) : canvas?.scene;
       if (!scene) throw new Error("Scene not found");
       return toPlainDocument(scene, { includeEmbedded: true });
+    }
+
+    case "list_compendium_packs":
+      return listCompendiumPacks(args);
+
+    case "search_compendium":
+      return searchCompendium(args);
+
+    case "get_compendium_document":
+      return getCompendiumDocument(args);
+
+    case "summarize_actor": {
+      const actor = getDocument("actors", args.id);
+      return summarizeActorDocument(actor, {
+        includeItems: args.includeItems === true,
+        itemLimit: args.itemLimit
+      });
+    }
+
+    case "summarize_scene": {
+      const scene = args.id ? game.scenes.get(args.id) : canvas?.scene;
+      if (!scene) throw new Error("Scene not found");
+      return summarizeSceneDocument(scene, {
+        includeTokens: args.includeTokens === true,
+        tokenLimit: args.tokenLimit
+      });
     }
 
     case "list_users":

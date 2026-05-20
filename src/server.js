@@ -8,8 +8,13 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { z } from "zod";
 import { WebSocketServer } from "ws";
+import {
+  BRIDGE_VERSION,
+  TOOL_DEFINITIONS,
+  listBridgeTools,
+  toolRegistryChecksum
+} from "./tool-registry.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const ROOT = path.resolve(path.dirname(__filename), "..");
@@ -446,6 +451,106 @@ async function tailLogs({ file = "debug.log", limit = 80 }) {
   return lines.map((line) => line.replace(/(password|token|secret|license|key)=\S+/gi, "$1=[REDACTED]"));
 }
 
+function pathChecks(worldId = activeWorldId()) {
+  const p = paths(worldId);
+  return {
+    data: { path: p.data, exists: fs.existsSync(p.data) },
+    world: { path: p.world, exists: p.world ? fs.existsSync(p.world) : false },
+    logs: { path: p.logs, exists: fs.existsSync(p.logs) },
+    options: { path: p.options, exists: fs.existsSync(p.options) },
+    moduleInstall: { path: p.moduleInstall, exists: fs.existsSync(p.moduleInstall) },
+    configDir: { path: p.configDir, exists: fs.existsSync(p.configDir) },
+    trustedWorlds: { path: p.trustedWorlds, exists: fs.existsSync(p.trustedWorlds) }
+  };
+}
+
+async function recentLogIssues() {
+  const issues = [];
+  for (const file of ["error.today.log", "debug.today.log"]) {
+    let lines = [];
+    try {
+      lines = await tailLogs({ file, limit: 80 });
+    } catch (error) {
+      issues.push({ file, level: "warn", message: `Unable to read ${file}: ${error.message}` });
+      continue;
+    }
+
+    for (const line of lines) {
+      const text = typeof line === "string" ? line : JSON.stringify(line);
+      if (/\b(error|warn|exception|failed|failure|deprecated)\b/i.test(text)) {
+        issues.push({ file, message: text.slice(0, 1000) });
+      }
+    }
+  }
+  return issues.slice(-12);
+}
+
+async function bridgeSelfCheck() {
+  const session = activeSession();
+  const status = await foundryStatus().catch((error) => ({ error: error.message }));
+  const liveSession = status?.liveSession ?? null;
+  const runtimeEvents = liveSession?.bridge?.runtimeEvents ?? null;
+  const checks = pathChecks(session?.hello?.worldId ?? null);
+  const logIssues = await recentLogIssues();
+  const actions = [];
+
+  if (!status?.foundryApi) {
+    actions.push("Start Foundry or confirm the local Foundry API is reachable on 127.0.0.1:30000.");
+  }
+  if (!session) {
+    actions.push("Open the target world as GM, enable the bridge module, set the bridge token, and authorize the world.");
+  }
+  if (status?.bridge?.pendingAuthorization?.length) {
+    actions.push("Authorize the pending GM world from the Foundry bridge prompt or run CodexFoundryBridge.authorizeCurrentWorld().");
+  }
+  if (!checks.moduleInstall.exists) {
+    actions.push("Install the bridge module into Foundry with install_or_update_bridge_module or npm run install:module.");
+  }
+  if (liveSession?.bridge?.version && liveSession.bridge.version !== BRIDGE_VERSION) {
+    actions.push(`Reload the GM client: running module script is ${liveSession.bridge.version}, expected ${BRIDGE_VERSION}.`);
+  }
+  if (liveSession?.bridge?.manifestVersion && liveSession.bridge.manifestVersion !== BRIDGE_VERSION) {
+    actions.push(`Restart or reload Foundry module metadata: manifest is ${liveSession.bridge.manifestVersion}, expected ${BRIDGE_VERSION}.`);
+  }
+  if (runtimeEvents?.errors) {
+    actions.push("Inspect get_runtime_events for live GM-client errors.");
+  }
+
+  return {
+    ready: Boolean(session && liveSession?.bridge?.version === BRIDGE_VERSION && checks.moduleInstall.exists),
+    bridgeVersion: BRIDGE_VERSION,
+    registry: {
+      version: listBridgeTools().registryVersion,
+      checksum: toolRegistryChecksum(),
+      toolCount: TOOL_DEFINITIONS.length
+    },
+    daemon: {
+      listening: true,
+      host: BRIDGE_HOST,
+      port: BRIDGE_PORT,
+      connectedSessions: sessions.size,
+      trustedSessions: [...sessions].filter(isTrustedSession).length,
+      pendingAuthorizationSessions: pendingAuthorizationSessions().length,
+      activeWorld: activeWorldId()
+    },
+    trustedWorlds: listTrustedWorlds(),
+    foundryApi: status?.foundryApi ?? null,
+    liveSession: liveSession
+      ? {
+          world: liveSession.world,
+          system: liveSession.system,
+          foundry: liveSession.foundry,
+          activeScene: liveSession.activeScene,
+          bridge: liveSession.bridge
+        }
+      : null,
+    paths: checks,
+    runtimeEvents,
+    recentLogIssues: logIssues,
+    actions
+  };
+}
+
 async function listInstalledPackages() {
   const p = paths();
   const packageRoots = {
@@ -479,11 +584,20 @@ async function executeTool(method, args = {}) {
   switch (method) {
     case "foundry_status":
       return foundryStatus();
+    case "bridge_self_check":
+      return bridgeSelfCheck();
+    case "list_bridge_tools":
+      return listBridgeTools();
     case "list_collections":
     case "get_document":
     case "search_documents":
     case "list_scenes":
     case "inspect_scene":
+    case "list_compendium_packs":
+    case "search_compendium":
+    case "get_compendium_document":
+    case "summarize_actor":
+    case "summarize_scene":
     case "list_users":
     case "read_settings":
     case "get_runtime_events":
@@ -717,399 +831,30 @@ process.on("SIGTERM", () => {
 });
 
 if (!process.argv.includes("--daemon")) {
-const AnyJson = z.any().optional();
-const server = new McpServer({
-  name: MCP_NAME,
-  version: "0.2.2"
-});
+  const server = new McpServer({
+    name: MCP_NAME,
+    version: BRIDGE_VERSION
+  });
 
-server.registerTool(
-  "foundry_status",
-  {
-    title: "Foundry status",
-    description: "Report Foundry runtime status, bridge connection state, and active GM session metadata.",
-    inputSchema: {}
-  },
-  async () => textResult(await foundryStatus())
-);
-
-server.registerTool(
-  "list_collections",
-  {
-    title: "List Foundry collections",
-    description: "List live Foundry world collections from the connected GM session.",
-    inputSchema: {}
-  },
-  async () => textResult(await sendFoundryRequest("list_collections", {}))
-);
-
-server.registerTool(
-  "get_document",
-  {
-    title: "Get Foundry document",
-    description: "Read a Foundry document by collection and id or name.",
-    inputSchema: {
-      collection: z.string(),
-      id: z.string(),
-      includeEmbedded: z.boolean().optional()
-    }
-  },
-  async (args) => textResult(await sendFoundryRequest("get_document", args))
-);
-
-server.registerTool(
-  "search_documents",
-  {
-    title: "Search Foundry documents",
-    description: "Search live documents in a collection.",
-    inputSchema: {
-      collection: z.string(),
-      query: z.string().optional(),
-      limit: z.number().optional()
-    }
-  },
-  async (args) => textResult(await sendFoundryRequest("search_documents", args))
-);
-
-server.registerTool(
-  "list_scenes",
-  {
-    title: "List scenes",
-    description: "List scenes in the active world.",
-    inputSchema: {}
-  },
-  async () => textResult(await sendFoundryRequest("list_scenes", {}))
-);
-
-server.registerTool(
-  "inspect_scene",
-  {
-    title: "Inspect scene",
-    description: "Read a scene including embedded scene documents.",
-    inputSchema: {
-      id: z.string().optional()
-    }
-  },
-  async (args) => textResult(await sendFoundryRequest("inspect_scene", args))
-);
-
-server.registerTool(
-  "list_users",
-  {
-    title: "List users",
-    description: "List Foundry users from the live world with sensitive fields redacted.",
-    inputSchema: {}
-  },
-  async () => textResult(await sendFoundryRequest("list_users", {}))
-);
-
-server.registerTool(
-  "read_settings",
-  {
-    title: "Read settings",
-    description: "Read live Foundry settings with sensitive fields redacted.",
-    inputSchema: {
-      namespace: z.string().optional()
-    }
-  },
-  async (args) => textResult(await sendFoundryRequest("read_settings", args))
-);
-
-server.registerTool(
-  "tail_logs",
-  {
-    title: "Tail Foundry logs",
-    description: "Read recent Foundry log lines from local log files with secret-like fields redacted.",
-    inputSchema: {
-      file: z.string().optional(),
-      limit: z.number().optional()
-    }
-  },
-  async ({ file = "debug.log", limit = 80 }) => {
-    return textResult(tailLogs({ file, limit }));
+  for (const tool of TOOL_DEFINITIONS) {
+    server.registerTool(
+      tool.name,
+      {
+        title: tool.title,
+        description: tool.description,
+        inputSchema: tool.inputSchema
+      },
+      async (args) => textResult(await executeTool(tool.name, args ?? {}))
+    );
   }
-);
 
-server.registerTool(
-  "get_runtime_events",
-  {
-    title: "Get runtime events",
-    description: "Read recent live GM-client runtime warnings, errors, notifications, and bridge request failures.",
-    inputSchema: {
-      limit: z.number().optional(),
-      level: z.string().optional(),
-      source: z.string().optional(),
-      since: z.string().optional()
-    }
-  },
-  async (args) => textResult(await sendFoundryRequest("get_runtime_events", args))
-);
-
-server.registerTool(
-  "clear_runtime_events",
-  {
-    title: "Clear runtime events",
-    description: "Clear the live GM-client runtime event buffer.",
-    inputSchema: {}
-  },
-  async () => textResult(await sendFoundryRequest("clear_runtime_events", {}))
-);
-
-server.registerTool(
-  "export_world_snapshot",
-  {
-    title: "Export world snapshot",
-    description: "Create a sanitized live snapshot of collections and basic server metadata.",
-    inputSchema: {}
-  },
-  async () => {
-    const collections = await sendFoundryRequest("list_collections", {});
-    const scenes = await sendFoundryRequest("list_scenes", {});
-    const users = await sendFoundryRequest("list_users", {});
-    const settings = await sendFoundryRequest("read_settings", {});
-    return textResult({ collections, scenes, users, settings });
+  async function main() {
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
   }
-);
 
-server.registerTool(
-  "create_document",
-  {
-    title: "Create document",
-    description: "Create a Foundry world document through the live GM session.",
-    inputSchema: {
-      documentName: z.string(),
-      data: AnyJson
-    }
-  },
-  async (args) => textResult(await sendFoundryRequest("create_document", args))
-);
-
-server.registerTool(
-  "update_document",
-  {
-    title: "Update document",
-    description: "Update a Foundry world document through the live GM session.",
-    inputSchema: {
-      collection: z.string(),
-      id: z.string(),
-      data: AnyJson
-    }
-  },
-  async (args) => textResult(await sendFoundryRequest("update_document", args))
-);
-
-server.registerTool(
-  "delete_document",
-  {
-    title: "Delete document",
-    description: "Delete a Foundry world document after creating a local backup.",
-    inputSchema: {
-      collection: z.string(),
-      id: z.string()
-    }
-  },
-  async (args) => {
-    const backup = await backupWorld();
-    const deleted = await sendFoundryRequest("delete_document", args);
-    return textResult({ backup, deleted });
-  }
-);
-
-server.registerTool(
-  "create_embedded_document",
-  {
-    title: "Create embedded document",
-    description: "Create an embedded Foundry document such as a TokenDocument on a Scene.",
-    inputSchema: {
-      parentCollection: z.string(),
-      parentId: z.string(),
-      embeddedName: z.string(),
-      data: AnyJson
-    }
-  },
-  async (args) => textResult(await sendFoundryRequest("create_embedded_document", args))
-);
-
-server.registerTool(
-  "update_embedded_document",
-  {
-    title: "Update embedded document",
-    description: "Update an embedded Foundry document such as a TokenDocument on a Scene.",
-    inputSchema: {
-      parentCollection: z.string(),
-      parentId: z.string(),
-      embeddedName: z.string(),
-      data: AnyJson
-    }
-  },
-  async (args) => textResult(await sendFoundryRequest("update_embedded_document", args))
-);
-
-server.registerTool(
-  "delete_embedded_document",
-  {
-    title: "Delete embedded document",
-    description: "Delete an embedded Foundry document after creating a local backup.",
-    inputSchema: {
-      parentCollection: z.string(),
-      parentId: z.string(),
-      embeddedName: z.string(),
-      embeddedId: z.string()
-    }
-  },
-  async (args) => {
-    const backup = await backupWorld();
-    const deleted = await sendFoundryRequest("delete_embedded_document", args);
-    return textResult({ backup, deleted });
-  }
-);
-
-server.registerTool(
-  "create_chat_message",
-  {
-    title: "Create chat message",
-    description: "Create a chat message in the active world.",
-    inputSchema: {
-      content: z.string(),
-      speaker: AnyJson,
-      whisper: AnyJson,
-      blind: z.boolean().optional()
-    }
-  },
-  async (args) => textResult(await sendFoundryRequest("create_chat_message", args))
-);
-
-server.registerTool(
-  "run_macro",
-  {
-    title: "Run macro",
-    description: "Run a Foundry macro by id or name through the GM session.",
-    inputSchema: {
-      id: z.string().optional(),
-      name: z.string().optional(),
-      context: AnyJson
-    }
-  },
-  async (args) => textResult(await sendFoundryRequest("run_macro", args))
-);
-
-server.registerTool(
-  "run_gm_script",
-  {
-    title: "Run GM script",
-    description: "Run explicit JavaScript in the live GM client. Requires dangerous=true.",
-    inputSchema: {
-      script: z.string(),
-      context: AnyJson,
-      dangerous: z.boolean()
-    }
-  },
-  async (args) => {
-    if (args.dangerous !== true) throw new Error("run_gm_script requires dangerous=true");
-    return textResult(await sendFoundryRequest("run_gm_script", args));
-  }
-);
-
-server.registerTool(
-  "list_installed_packages",
-  {
-    title: "List installed packages",
-    description: "List installed local systems, modules, and worlds from Foundry data.",
-    inputSchema: {}
-  },
-  async () => {
-    const p = paths();
-    const packageRoots = {
-      systems: path.join(p.data, "Data", "systems"),
-      modules: path.join(p.data, "Data", "modules"),
-      worlds: path.join(p.data, "Data", "worlds")
-    };
-    const result = {};
-    for (const [kind, root] of Object.entries(packageRoots)) {
-      result[kind] = [];
-      if (!fs.existsSync(root)) continue;
-      for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-        if (!entry.isDirectory()) continue;
-        const manifestName = kind === "worlds" ? "world.json" : kind === "systems" ? "system.json" : "module.json";
-        const manifestPath = path.join(root, entry.name, manifestName);
-        if (fs.existsSync(manifestPath)) {
-          const manifest = redact(readJsonFile(manifestPath));
-          result[kind].push({
-            id: manifest.id ?? entry.name,
-            title: manifest.title,
-            version: manifest.version,
-            compatibility: manifest.compatibility
-          });
-        }
-      }
-    }
-    return textResult(result);
-  }
-);
-
-server.registerTool(
-  "read_foundry_options_sanitized",
-  {
-    title: "Read sanitized Foundry options",
-    description: "Read Foundry options.json with secrets redacted.",
-    inputSchema: {}
-  },
-  async () => textResult(sanitizeOptions(readJsonFile(paths().options)))
-);
-
-server.registerTool(
-  "list_trusted_worlds",
-  {
-    title: "List trusted worlds",
-    description: "List Foundry worlds authorized to connect through this local bridge.",
-    inputSchema: {}
-  },
-  async () => textResult({ trustedWorlds: listTrustedWorlds(), path: TRUSTED_WORLDS_FILE })
-);
-
-server.registerTool(
-  "revoke_trusted_world",
-  {
-    title: "Revoke trusted world",
-    description: "Remove a Foundry world from the local bridge trusted-world list.",
-    inputSchema: {
-      worldId: z.string()
-    }
-  },
-  async (args) => textResult(revokeTrustedWorld(args.worldId))
-);
-
-server.registerTool(
-  "backup_world",
-  {
-    title: "Backup world",
-    description: "Copy the active world directory to the bridge backup folder.",
-    inputSchema: {}
-  },
-  async () => textResult(await backupWorld())
-);
-
-server.registerTool(
-  "install_or_update_bridge_module",
-  {
-    title: "Install or update bridge module",
-    description: "Copy the bridge Foundry module into the local Foundry modules directory.",
-    inputSchema: {}
-  },
-  async () => {
-    const p = paths();
-    copyDirectory(MODULE_SOURCE_DIR, p.moduleInstall);
-    return textResult({ ok: true, installedTo: p.moduleInstall });
-  }
-);
-
-async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-}
-
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
 }

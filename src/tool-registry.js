@@ -1,0 +1,400 @@
+import { createHash } from "node:crypto";
+import { z } from "zod";
+
+export const BRIDGE_VERSION = "0.2.3";
+export const TOOL_REGISTRY_VERSION = 1;
+
+const AnyJson = z.any().optional();
+
+export const TOOL_DEFINITIONS = [
+  {
+    name: "foundry_status",
+    title: "Foundry status",
+    description: "Report Foundry runtime status, bridge daemon state, and active GM session metadata.",
+    inputSchema: {},
+    risk: "read",
+    requiresTrustedSession: false
+  },
+  {
+    name: "bridge_self_check",
+    title: "Bridge self check",
+    description: "Run a read-only bridge health check with diagnostics and actionable next steps.",
+    inputSchema: {},
+    risk: "read",
+    requiresTrustedSession: false
+  },
+  {
+    name: "list_bridge_tools",
+    title: "List bridge tools",
+    description: "List bridge tool metadata, risk flags, and registry checksum.",
+    inputSchema: {},
+    risk: "read",
+    requiresTrustedSession: false
+  },
+  {
+    name: "list_collections",
+    title: "List Foundry collections",
+    description: "List live Foundry world collections from the connected GM session.",
+    inputSchema: {},
+    risk: "read",
+    requiresTrustedSession: true
+  },
+  {
+    name: "get_document",
+    title: "Get Foundry document",
+    description: "Read a Foundry document by collection and id or name.",
+    inputSchema: {
+      collection: z.string(),
+      id: z.string(),
+      includeEmbedded: z.boolean().optional()
+    },
+    risk: "read",
+    requiresTrustedSession: true
+  },
+  {
+    name: "search_documents",
+    title: "Search Foundry documents",
+    description: "Search live documents in a collection.",
+    inputSchema: {
+      collection: z.string(),
+      query: z.string().optional(),
+      limit: z.number().optional()
+    },
+    risk: "read",
+    requiresTrustedSession: true
+  },
+  {
+    name: "list_scenes",
+    title: "List scenes",
+    description: "List scenes in the active world.",
+    inputSchema: {},
+    risk: "read",
+    requiresTrustedSession: true
+  },
+  {
+    name: "inspect_scene",
+    title: "Inspect scene",
+    description: "Read a scene including embedded scene documents.",
+    inputSchema: {
+      id: z.string().optional()
+    },
+    risk: "read",
+    requiresTrustedSession: true
+  },
+  {
+    name: "list_compendium_packs",
+    title: "List compendium packs",
+    description: "List live Foundry compendium packs with compact metadata.",
+    inputSchema: {
+      packageName: z.string().optional(),
+      documentName: z.string().optional(),
+      query: z.string().optional(),
+      limit: z.number().optional()
+    },
+    risk: "read",
+    requiresTrustedSession: true
+  },
+  {
+    name: "search_compendium",
+    title: "Search compendium",
+    description: "Search live Foundry compendium indexes without scraping pack storage files.",
+    inputSchema: {
+      pack: z.string().optional(),
+      query: z.string().optional(),
+      documentName: z.string().optional(),
+      type: z.string().optional(),
+      limit: z.number().optional(),
+      fields: z.array(z.string()).optional()
+    },
+    risk: "read",
+    requiresTrustedSession: true
+  },
+  {
+    name: "get_compendium_document",
+    title: "Get compendium document",
+    description: "Read or summarize a single document from a live Foundry compendium pack.",
+    inputSchema: {
+      pack: z.string(),
+      id: z.string(),
+      summarize: z.boolean().optional()
+    },
+    risk: "read",
+    requiresTrustedSession: true
+  },
+  {
+    name: "summarize_actor",
+    title: "Summarize actor",
+    description: "Return a compact D35E-oriented summary of a live world actor.",
+    inputSchema: {
+      id: z.string(),
+      includeItems: z.boolean().optional(),
+      itemLimit: z.number().optional()
+    },
+    risk: "read",
+    requiresTrustedSession: true
+  },
+  {
+    name: "summarize_scene",
+    title: "Summarize scene",
+    description: "Return a compact summary of a live scene and optional token details.",
+    inputSchema: {
+      id: z.string().optional(),
+      includeTokens: z.boolean().optional(),
+      tokenLimit: z.number().optional()
+    },
+    risk: "read",
+    requiresTrustedSession: true
+  },
+  {
+    name: "list_users",
+    title: "List users",
+    description: "List Foundry users from the live world with sensitive fields redacted.",
+    inputSchema: {},
+    risk: "read",
+    requiresTrustedSession: true
+  },
+  {
+    name: "read_settings",
+    title: "Read settings",
+    description: "Read live Foundry settings with sensitive fields redacted.",
+    inputSchema: {
+      namespace: z.string().optional()
+    },
+    risk: "read",
+    requiresTrustedSession: true
+  },
+  {
+    name: "tail_logs",
+    title: "Tail Foundry logs",
+    description: "Read recent Foundry log lines from local log files with secret-like fields redacted.",
+    inputSchema: {
+      file: z.string().optional(),
+      limit: z.number().optional()
+    },
+    risk: "read",
+    requiresTrustedSession: false
+  },
+  {
+    name: "get_runtime_events",
+    title: "Get runtime events",
+    description: "Read recent live GM-client runtime warnings, errors, notifications, and bridge request failures.",
+    inputSchema: {
+      limit: z.number().optional(),
+      level: z.string().optional(),
+      source: z.string().optional(),
+      since: z.string().optional()
+    },
+    risk: "read",
+    requiresTrustedSession: true
+  },
+  {
+    name: "clear_runtime_events",
+    title: "Clear runtime events",
+    description: "Clear the live GM-client runtime event buffer.",
+    inputSchema: {},
+    risk: "diagnostic-write",
+    requiresTrustedSession: true
+  },
+  {
+    name: "export_world_snapshot",
+    title: "Export world snapshot",
+    description: "Create a sanitized live snapshot of collections and basic server metadata.",
+    inputSchema: {},
+    risk: "read",
+    requiresTrustedSession: true
+  },
+  {
+    name: "create_document",
+    title: "Create document",
+    description: "Create a Foundry world document through the live GM session.",
+    inputSchema: {
+      documentName: z.string(),
+      data: AnyJson
+    },
+    risk: "write",
+    requiresTrustedSession: true
+  },
+  {
+    name: "update_document",
+    title: "Update document",
+    description: "Update a Foundry world document through the live GM session.",
+    inputSchema: {
+      collection: z.string(),
+      id: z.string(),
+      data: AnyJson
+    },
+    risk: "write",
+    requiresTrustedSession: true
+  },
+  {
+    name: "delete_document",
+    title: "Delete document",
+    description: "Delete a Foundry world document after creating a local backup.",
+    inputSchema: {
+      collection: z.string(),
+      id: z.string()
+    },
+    risk: "destructive-with-backup",
+    requiresTrustedSession: true
+  },
+  {
+    name: "create_embedded_document",
+    title: "Create embedded document",
+    description: "Create an embedded Foundry document such as a TokenDocument on a Scene.",
+    inputSchema: {
+      parentCollection: z.string(),
+      parentId: z.string(),
+      embeddedName: z.string(),
+      data: AnyJson
+    },
+    risk: "write",
+    requiresTrustedSession: true
+  },
+  {
+    name: "update_embedded_document",
+    title: "Update embedded document",
+    description: "Update an embedded Foundry document such as a TokenDocument on a Scene.",
+    inputSchema: {
+      parentCollection: z.string(),
+      parentId: z.string(),
+      embeddedName: z.string(),
+      data: AnyJson
+    },
+    risk: "write",
+    requiresTrustedSession: true
+  },
+  {
+    name: "delete_embedded_document",
+    title: "Delete embedded document",
+    description: "Delete an embedded Foundry document after creating a local backup.",
+    inputSchema: {
+      parentCollection: z.string(),
+      parentId: z.string(),
+      embeddedName: z.string(),
+      embeddedId: z.string()
+    },
+    risk: "destructive-with-backup",
+    requiresTrustedSession: true
+  },
+  {
+    name: "create_chat_message",
+    title: "Create chat message",
+    description: "Create a chat message in the active world.",
+    inputSchema: {
+      content: z.string(),
+      speaker: AnyJson,
+      whisper: AnyJson,
+      blind: z.boolean().optional()
+    },
+    risk: "write",
+    requiresTrustedSession: true
+  },
+  {
+    name: "run_macro",
+    title: "Run macro",
+    description: "Run a Foundry macro by id or name through the GM session.",
+    inputSchema: {
+      id: z.string().optional(),
+      name: z.string().optional(),
+      context: AnyJson
+    },
+    risk: "execute-foundry-macro",
+    requiresTrustedSession: true
+  },
+  {
+    name: "run_gm_script",
+    title: "Run GM script",
+    description: "Run explicit JavaScript in the live GM client. Requires dangerous=true.",
+    inputSchema: {
+      script: z.string(),
+      context: AnyJson,
+      dangerous: z.boolean()
+    },
+    risk: "dangerous-execute",
+    requiresTrustedSession: true
+  },
+  {
+    name: "list_installed_packages",
+    title: "List installed packages",
+    description: "List installed local systems, modules, and worlds from Foundry data.",
+    inputSchema: {},
+    risk: "read",
+    requiresTrustedSession: false
+  },
+  {
+    name: "read_foundry_options_sanitized",
+    title: "Read sanitized Foundry options",
+    description: "Read Foundry options.json with secrets redacted.",
+    inputSchema: {},
+    risk: "read-sensitive-redacted",
+    requiresTrustedSession: false
+  },
+  {
+    name: "list_trusted_worlds",
+    title: "List trusted worlds",
+    description: "List Foundry worlds authorized to connect through this local bridge.",
+    inputSchema: {},
+    risk: "read",
+    requiresTrustedSession: false
+  },
+  {
+    name: "revoke_trusted_world",
+    title: "Revoke trusted world",
+    description: "Remove a Foundry world from the local bridge trusted-world list.",
+    inputSchema: {
+      worldId: z.string()
+    },
+    risk: "local-config-write",
+    requiresTrustedSession: false
+  },
+  {
+    name: "backup_world",
+    title: "Backup world",
+    description: "Copy the active world directory to the bridge backup folder.",
+    inputSchema: {},
+    risk: "local-backup-write",
+    requiresTrustedSession: true
+  },
+  {
+    name: "install_or_update_bridge_module",
+    title: "Install or update bridge module",
+    description: "Copy the bridge Foundry module into the local Foundry modules directory.",
+    inputSchema: {},
+    risk: "local-module-write",
+    requiresTrustedSession: false
+  }
+];
+
+export function toolDefinitionByName(name) {
+  return TOOL_DEFINITIONS.find((tool) => tool.name === name) ?? null;
+}
+
+export function publicToolDefinition(tool) {
+  return {
+    name: tool.name,
+    title: tool.title,
+    description: tool.description,
+    risk: tool.risk,
+    readOnly: tool.risk === "read" || tool.risk === "read-sensitive-redacted",
+    requiresTrustedSession: tool.requiresTrustedSession,
+    inputKeys: Object.keys(tool.inputSchema ?? {}).sort()
+  };
+}
+
+export function listBridgeTools() {
+  return {
+    bridgeVersion: BRIDGE_VERSION,
+    registryVersion: TOOL_REGISTRY_VERSION,
+    checksum: toolRegistryChecksum(),
+    tools: TOOL_DEFINITIONS.map(publicToolDefinition)
+  };
+}
+
+export function toolRegistryChecksum() {
+  const payload = JSON.stringify({
+    bridgeVersion: BRIDGE_VERSION,
+    registryVersion: TOOL_REGISTRY_VERSION,
+    tools: TOOL_DEFINITIONS.map(publicToolDefinition)
+  });
+  return createHash("sha256").update(payload).digest("hex");
+}

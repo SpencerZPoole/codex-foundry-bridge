@@ -5,6 +5,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import process from "node:process";
 import WebSocket from "ws";
+import { TOOL_DEFINITIONS, toolRegistryChecksum } from "../src/tool-registry.js";
 
 const token = process.env.CODEX_FOUNDRY_BRIDGE_TOKEN || "smoke-test-token";
 const port = 30124;
@@ -13,8 +14,12 @@ const configDir = path.join(tempRoot, "config");
 const foundryDataDir = path.join(tempRoot, "FoundryVTT");
 const trustedWorldsPath = path.join(configDir, "trusted-worlds.json");
 const dynamicWorldId = "dynamic-smoke-world";
+const registeredToolNames = TOOL_DEFINITIONS.map((tool) => tool.name);
 
 fs.mkdirSync(path.join(foundryDataDir, "Data", "worlds", dynamicWorldId), { recursive: true });
+assert.equal(new Set(registeredToolNames).size, registeredToolNames.length);
+assert.ok(registeredToolNames.includes("bridge_self_check"));
+assert.ok(registeredToolNames.includes("list_compendium_packs"));
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -92,6 +97,22 @@ try {
   assert.equal(initialStatus.trustedSessions, 0);
   assert.equal(initialStatus.pendingAuthorizationSessions, 0);
 
+  const toolsCall = await callBridge("list_bridge_tools");
+  assert.equal(toolsCall.body.result.bridgeVersion, "0.2.3");
+  assert.equal(toolsCall.body.result.checksum, toolRegistryChecksum());
+  assert.deepEqual(
+    toolsCall.body.result.tools.map((tool) => tool.name).sort(),
+    [...registeredToolNames].sort()
+  );
+  assert.equal(toolsCall.body.result.tools.find((tool) => tool.name === "create_document").risk, "write");
+  assert.equal(toolsCall.body.result.tools.find((tool) => tool.name === "list_compendium_packs").readOnly, true);
+
+  const initialSelfCheck = await callBridge("bridge_self_check");
+  assert.equal(initialSelfCheck.body.result.bridgeVersion, "0.2.3");
+  assert.equal(initialSelfCheck.body.result.daemon.trustedSessions, 0);
+  assert.equal(initialSelfCheck.body.result.registry.checksum, toolRegistryChecksum());
+  assert.equal(JSON.stringify(initialSelfCheck.body.result).includes(token), false);
+
   const bad = new WebSocket(`ws://127.0.0.1:${port}/foundry`);
   await new Promise((resolve) => bad.on("open", resolve));
   bad.send(JSON.stringify({
@@ -153,6 +174,10 @@ try {
   assert.equal(refused.response.status, 500);
   assert.match(refused.body.error, /trusted GM Foundry bridge session/);
 
+  const refusedReadIntelligence = await callBridge("list_compendium_packs", {}, { expectOk: false });
+  assert.equal(refusedReadIntelligence.response.status, 500);
+  assert.match(refusedReadIntelligence.body.error, /trusted GM Foundry bridge session/);
+
   gm.send(JSON.stringify({ type: "authorizeWorld", token }));
   const authorized = await waitForMessage(gm, (message) => message.type === "authorizationStatus" && message.trusted === true);
   assert.equal(authorized.world.id, dynamicWorldId);
@@ -175,6 +200,17 @@ try {
 
   const trustedWorlds = await callBridge("list_trusted_worlds");
   assert.deepEqual(trustedWorlds.body.result.trustedWorlds.map((world) => world.id), [dynamicWorldId]);
+
+  for (const method of [
+    "list_compendium_packs",
+    "search_compendium",
+    "get_compendium_document",
+    "summarize_actor",
+    "summarize_scene"
+  ]) {
+    const call = await callBridge(method, { pack: "D35E.spells", id: "acid arrow" });
+    assert.equal(call.body.result.method, method);
+  }
 
   const revoked = await callBridge("revoke_trusted_world", { worldId: dynamicWorldId });
   assert.deepEqual(revoked.body.result, { revoked: true, worldId: dynamicWorldId });
