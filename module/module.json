@@ -1,0 +1,18 @@
+{
+  "id": "codex-foundry-bridge",
+  "title": "Codex Foundry Bridge",
+  "description": "Local-only bridge that lets Codex MCP tools read and control a trusted GM Foundry session.",
+  "version": "0.2.2",
+  "authors": [
+    {
+      "name": "Spencer Poole"
+    }
+  ],
+  "compatibility": {
+    "minimum": "14",
+    "verified": "14.361"
+  },
+  "esmodules": [
+    "scripts/bridge.js"
+  ]
+}

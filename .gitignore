@@ -1,0 +1,6 @@
+node_modules/
+bridge-token.txt
+*.log
+backups/
+config/trusted-worlds.json
+config/trusted-worlds.json.tmp
