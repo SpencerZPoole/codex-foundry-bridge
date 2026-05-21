@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
-export const BRIDGE_VERSION = "0.2.3";
+export const BRIDGE_VERSION = "0.2.4";
 export const TOOL_REGISTRY_VERSION = 1;
 
 const AnyJson = z.any().optional();
@@ -29,6 +29,17 @@ export const TOOL_DEFINITIONS = [
     description: "List bridge tool metadata, risk flags, and registry checksum.",
     inputSchema: {},
     risk: "read",
+    requiresTrustedSession: false
+  },
+  {
+    name: "call_bridge_tool",
+    title: "Call bridge tool",
+    description: "Fallback dispatcher for invoking any registered bridge tool when direct MCP discovery lags.",
+    inputSchema: {
+      method: z.string(),
+      args: AnyJson
+    },
+    risk: "meta-dispatch",
     requiresTrustedSession: false
   },
   {
@@ -386,6 +397,10 @@ export function listBridgeTools() {
     bridgeVersion: BRIDGE_VERSION,
     registryVersion: TOOL_REGISTRY_VERSION,
     checksum: toolRegistryChecksum(),
+    fallback: {
+      tool: "call_bridge_tool",
+      note: "Use call_bridge_tool when direct MCP discovery lags; the target tool's normal safety gates still apply."
+    },
     tools: TOOL_DEFINITIONS.map(publicToolDefinition)
   };
 }

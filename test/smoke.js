@@ -4,11 +4,15 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import WebSocket from "ws";
 import { TOOL_DEFINITIONS, toolRegistryChecksum } from "../src/tool-registry.js";
 
 const token = process.env.CODEX_FOUNDRY_BRIDGE_TOKEN || "smoke-test-token";
 const port = 30124;
+const projectRoot = fileURLToPath(new URL("..", import.meta.url));
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "foundry-codex-bridge-smoke-"));
 const configDir = path.join(tempRoot, "config");
 const foundryDataDir = path.join(tempRoot, "FoundryVTT");
@@ -19,6 +23,7 @@ const registeredToolNames = TOOL_DEFINITIONS.map((tool) => tool.name);
 fs.mkdirSync(path.join(foundryDataDir, "Data", "worlds", dynamicWorldId), { recursive: true });
 assert.equal(new Set(registeredToolNames).size, registeredToolNames.length);
 assert.ok(registeredToolNames.includes("bridge_self_check"));
+assert.ok(registeredToolNames.includes("call_bridge_tool"));
 assert.ok(registeredToolNames.includes("list_compendium_packs"));
 
 function wait(ms) {
@@ -78,8 +83,32 @@ async function callBridge(method, args = {}, { expectOk = true } = {}) {
   return { response, body };
 }
 
+async function withMcpClient(callback) {
+  const client = new Client({ name: "foundry-codex-bridge-smoke", version: "0.0.0" });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: ["src/mcp.js"],
+    cwd: projectRoot,
+    stderr: "pipe",
+    env: {
+      ...process.env,
+      CODEX_FOUNDRY_BRIDGE_TOKEN: token,
+      FOUNDRY_BRIDGE_PORT: String(port),
+      FOUNDRY_BRIDGE_CONFIG_DIR: configDir,
+      FOUNDRY_DATA_DIR: foundryDataDir
+    }
+  });
+
+  try {
+    await client.connect(transport);
+    return await callback(client);
+  } finally {
+    await client.close();
+  }
+}
+
 const child = spawn(process.execPath, ["src/server.js"], {
-  cwd: new URL("..", import.meta.url),
+  cwd: projectRoot,
   env: {
     ...process.env,
     CODEX_FOUNDRY_BRIDGE_TOKEN: token,
@@ -98,7 +127,7 @@ try {
   assert.equal(initialStatus.pendingAuthorizationSessions, 0);
 
   const toolsCall = await callBridge("list_bridge_tools");
-  assert.equal(toolsCall.body.result.bridgeVersion, "0.2.3");
+  assert.equal(toolsCall.body.result.bridgeVersion, "0.2.4");
   assert.equal(toolsCall.body.result.checksum, toolRegistryChecksum());
   assert.deepEqual(
     toolsCall.body.result.tools.map((tool) => tool.name).sort(),
@@ -106,12 +135,59 @@ try {
   );
   assert.equal(toolsCall.body.result.tools.find((tool) => tool.name === "create_document").risk, "write");
   assert.equal(toolsCall.body.result.tools.find((tool) => tool.name === "list_compendium_packs").readOnly, true);
+  assert.equal(toolsCall.body.result.fallback.tool, "call_bridge_tool");
+
+  const toolsViaFallback = await callBridge("call_bridge_tool", {
+    method: "list_bridge_tools"
+  });
+  assert.equal(toolsViaFallback.body.result.checksum, toolRegistryChecksum());
+  assert.deepEqual(
+    toolsViaFallback.body.result.tools.map((tool) => tool.name).sort(),
+    [...registeredToolNames].sort()
+  );
+
+  const mcpToolList = await withMcpClient((client) => client.listTools());
+  assert.deepEqual(
+    mcpToolList.tools.map((tool) => tool.name).sort(),
+    [...registeredToolNames].sort()
+  );
+
+  const mcpFallbackResult = await withMcpClient((client) => client.callTool({
+    name: "call_bridge_tool",
+    arguments: { method: "list_bridge_tools" }
+  }));
+  const mcpFallbackPayload = JSON.parse(mcpFallbackResult.content[0].text);
+  assert.equal(mcpFallbackPayload.fallback.tool, "call_bridge_tool");
+  assert.deepEqual(
+    mcpFallbackPayload.tools.map((tool) => tool.name).sort(),
+    [...registeredToolNames].sort()
+  );
 
   const initialSelfCheck = await callBridge("bridge_self_check");
-  assert.equal(initialSelfCheck.body.result.bridgeVersion, "0.2.3");
+  assert.equal(initialSelfCheck.body.result.bridgeVersion, "0.2.4");
   assert.equal(initialSelfCheck.body.result.daemon.trustedSessions, 0);
   assert.equal(initialSelfCheck.body.result.registry.checksum, toolRegistryChecksum());
+  assert.equal(initialSelfCheck.body.result.registry.fallback.tool, "call_bridge_tool");
   assert.equal(JSON.stringify(initialSelfCheck.body.result).includes(token), false);
+
+  const selfCheckViaFallback = await callBridge("call_bridge_tool", {
+    method: "bridge_self_check"
+  });
+  assert.equal(selfCheckViaFallback.body.result.bridgeVersion, "0.2.4");
+
+  const recursiveFallback = await callBridge("call_bridge_tool", {
+    method: "call_bridge_tool",
+    args: { method: "list_bridge_tools" }
+  }, { expectOk: false });
+  assert.equal(recursiveFallback.response.status, 500);
+  assert.match(recursiveFallback.body.error, /cannot invoke itself/);
+
+  const scriptWithoutDangerous = await callBridge("call_bridge_tool", {
+    method: "run_gm_script",
+    args: { script: "return null;" }
+  }, { expectOk: false });
+  assert.equal(scriptWithoutDangerous.response.status, 500);
+  assert.match(scriptWithoutDangerous.body.error, /dangerous=true/);
 
   const bad = new WebSocket(`ws://127.0.0.1:${port}/foundry`);
   await new Promise((resolve) => bad.on("open", resolve));
@@ -178,6 +254,12 @@ try {
   assert.equal(refusedReadIntelligence.response.status, 500);
   assert.match(refusedReadIntelligence.body.error, /trusted GM Foundry bridge session/);
 
+  const refusedFallbackLiveTool = await callBridge("call_bridge_tool", {
+    method: "list_collections"
+  }, { expectOk: false });
+  assert.equal(refusedFallbackLiveTool.response.status, 500);
+  assert.match(refusedFallbackLiveTool.body.error, /trusted GM Foundry bridge session/);
+
   gm.send(JSON.stringify({ type: "authorizeWorld", token }));
   const authorized = await waitForMessage(gm, (message) => message.type === "authorizationStatus" && message.trusted === true);
   assert.equal(authorized.world.id, dynamicWorldId);
@@ -201,6 +283,11 @@ try {
   const trustedWorlds = await callBridge("list_trusted_worlds");
   assert.deepEqual(trustedWorlds.body.result.trustedWorlds.map((world) => world.id), [dynamicWorldId]);
 
+  const collectionsViaFallback = await callBridge("call_bridge_tool", {
+    method: "list_collections"
+  });
+  assert.equal(collectionsViaFallback.body.result.method, "list_collections");
+
   for (const method of [
     "list_compendium_packs",
     "search_compendium",
@@ -210,6 +297,11 @@ try {
   ]) {
     const call = await callBridge(method, { pack: "D35E.spells", id: "acid arrow" });
     assert.equal(call.body.result.method, method);
+    const fallbackCall = await callBridge("call_bridge_tool", {
+      method,
+      args: { pack: "D35E.spells", id: "acid arrow" }
+    });
+    assert.equal(fallbackCall.body.result.method, method);
   }
 
   const revoked = await callBridge("revoke_trusted_world", { worldId: dynamicWorldId });

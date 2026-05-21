@@ -13,6 +13,7 @@ import {
   BRIDGE_VERSION,
   TOOL_DEFINITIONS,
   listBridgeTools,
+  toolDefinitionByName,
   toolRegistryChecksum
 } from "./tool-registry.js";
 
@@ -522,7 +523,11 @@ async function bridgeSelfCheck() {
     registry: {
       version: listBridgeTools().registryVersion,
       checksum: toolRegistryChecksum(),
-      toolCount: TOOL_DEFINITIONS.length
+      toolCount: TOOL_DEFINITIONS.length,
+      fallback: {
+        tool: "call_bridge_tool",
+        note: "Use call_bridge_tool when direct MCP discovery lags; the target tool's normal safety gates still apply."
+      }
     },
     daemon: {
       listening: true,
@@ -580,6 +585,18 @@ async function listInstalledPackages() {
   return result;
 }
 
+async function callBridgeTool({ method, args = {} } = {}) {
+  const targetMethod = String(method ?? "").trim();
+  if (!targetMethod) throw new Error("call_bridge_tool requires method.");
+  if (targetMethod === "call_bridge_tool") {
+    throw new Error("call_bridge_tool cannot invoke itself.");
+  }
+  if (!toolDefinitionByName(targetMethod)) {
+    throw new Error(`Unknown bridge method: ${targetMethod}`);
+  }
+  return executeTool(targetMethod, args ?? {});
+}
+
 async function executeTool(method, args = {}) {
   switch (method) {
     case "foundry_status":
@@ -588,6 +605,8 @@ async function executeTool(method, args = {}) {
       return bridgeSelfCheck();
     case "list_bridge_tools":
       return listBridgeTools();
+    case "call_bridge_tool":
+      return callBridgeTool(args);
     case "list_collections":
     case "get_document":
     case "search_documents":

@@ -65,10 +65,20 @@ Useful MCP/daemon tools:
 - `foundry_status` shows trusted and pending sessions plus the trusted-world config path.
 - `bridge_self_check` reports daemon, module, version, runtime, path, log, and trusted-world health.
 - `list_bridge_tools` returns the shared tool registry with risk flags and checksum.
+- `call_bridge_tool` invokes any registered bridge tool by name when direct MCP discovery lags.
 - `list_trusted_worlds` lists authorized world ids and metadata.
 - `revoke_trusted_world` removes a world from the trusted list.
 - `list_compendium_packs`, `search_compendium`, and `get_compendium_document` read live Foundry compendium APIs without scraping pack storage.
 - `summarize_actor` and `summarize_scene` provide compact read-only D35E/world summaries.
+
+Fallback examples:
+
+```json
+{ "method": "bridge_self_check" }
+{ "method": "search_compendium", "args": { "pack": "D35E.spells", "query": "acid arrow", "limit": 5 } }
+```
+
+The fallback is not a privilege bypass. High-risk tools still require their normal arguments and gates, such as `run_gm_script` requiring `dangerous=true` and a trusted GM session.
 
 If the module cannot be enabled from the Foundry UI, close Foundry completely and run:
 
