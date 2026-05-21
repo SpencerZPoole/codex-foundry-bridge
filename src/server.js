@@ -415,6 +415,32 @@ function operationRequiresBackup(operation) {
     || updateOperations.has(operation?.type);
 }
 
+function validateChatPlanOperation(operation) {
+  const allowedKinds = new Set(["notice", "handout", "gm_note", "secret_check_prompt"]);
+  const allowedAudiences = new Set(["all", "gms", "players", "users"]);
+  const target = operation.target ?? {};
+  const data = operation.data ?? {};
+
+  if (!allowedKinds.has(target.kind)) {
+    throw new Error(`Unsupported chat message kind: ${target.kind ?? "(missing)"}`);
+  }
+  if (!allowedAudiences.has(target.audience)) {
+    throw new Error(`Unsupported chat message audience: ${target.audience ?? "(missing)"}`);
+  }
+  if (typeof data.content !== "string" || !data.content.trim()) {
+    throw new Error(`Bridge plan operation ${operation.opId} requires non-empty chat content.`);
+  }
+  if (data.speaker != null && (typeof data.speaker !== "object" || Array.isArray(data.speaker))) {
+    throw new Error(`Bridge plan operation ${operation.opId} has invalid chat speaker.`);
+  }
+  if (data.whisper != null && !Array.isArray(data.whisper)) {
+    throw new Error(`Bridge plan operation ${operation.opId} has invalid chat whisper targets.`);
+  }
+  if (target.audience === "users" && (!Array.isArray(data.whisper) || !data.whisper.length)) {
+    throw new Error(`Bridge plan operation ${operation.opId} requires chat user recipients.`);
+  }
+}
+
 function validateBridgePlanOperation(operation) {
   const allowed = new Set([
     "journal.create_entry",
@@ -428,7 +454,8 @@ function validateBridgePlanOperation(operation) {
     "scene.create_light",
     "scene.update_light",
     "scene.create_note",
-    "scene.update_note"
+    "scene.update_note",
+    "chat.create_message"
   ]);
   if (!operation || typeof operation !== "object") throw new Error("Bridge plan operation must be an object.");
   if (!operation.opId || typeof operation.opId !== "string") throw new Error("Bridge plan operation is missing opId.");
@@ -472,6 +499,7 @@ function validateBridgePlanOperation(operation) {
   if (operation.type === "scene.update_note" && !operation.target.noteId) {
     throw new Error(`Bridge plan operation ${operation.opId} is missing noteId.`);
   }
+  if (operation.type === "chat.create_message") validateChatPlanOperation(operation);
 }
 
 function validateBridgePlanForApply(plan, confirmation = {}) {
@@ -481,9 +509,9 @@ function validateBridgePlanForApply(plan, confirmation = {}) {
   if (!confirmation || typeof confirmation !== "object" || Array.isArray(confirmation)) {
     throw new Error("apply_bridge_plan requires confirmation.");
   }
-  const supportedSources = new Set(["plan_journal_changes", "plan_scene_changes", "plan_document_changes"]);
+  const supportedSources = new Set(["plan_journal_changes", "plan_scene_changes", "plan_document_changes", "plan_chat_messages"]);
   if (plan.kind !== "bridge-plan" || !supportedSources.has(plan.source) || plan.version !== 1) {
-    throw new Error("apply_bridge_plan only accepts version 1 plans produced by plan_journal_changes, plan_scene_changes, or plan_document_changes.");
+    throw new Error("apply_bridge_plan only accepts version 1 plans produced by plan_journal_changes, plan_scene_changes, plan_document_changes, or plan_chat_messages.");
   }
   if (!plan.planId || !plan.planHash || !plan.worldId) {
     throw new Error("apply_bridge_plan plan is missing planId, planHash, or worldId.");
@@ -851,6 +879,8 @@ async function executeTool(method, args = {}) {
     case "plan_journal_changes":
     case "plan_scene_changes":
     case "plan_document_changes":
+    case "list_chat_targets":
+    case "plan_chat_messages":
     case "create_document":
     case "update_document":
     case "create_embedded_document":

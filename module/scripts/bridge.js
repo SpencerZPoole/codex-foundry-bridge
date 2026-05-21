@@ -1,5 +1,5 @@
 const MODULE_ID = "codex-foundry-bridge";
-const MODULE_VERSION = "0.2.11";
+const MODULE_VERSION = "0.2.12";
 const DEFAULT_URL = "ws://127.0.0.1:30123/foundry";
 const RECONNECT_MS = 5000;
 const MAX_RESULT_CHARS = 1_000_000;
@@ -1093,11 +1093,30 @@ function journalEntryPreview(entryOrData) {
   });
 }
 
-const SUPPORTED_PLAN_SOURCES = new Set(["plan_journal_changes", "plan_scene_changes", "plan_document_changes"]);
+const SUPPORTED_PLAN_SOURCES = new Set(["plan_journal_changes", "plan_scene_changes", "plan_document_changes", "plan_chat_messages"]);
 const DOCUMENT_PLAN_NAMES = new Set(["Actor", "Item", "Scene", "Folder"]);
 const FOLDER_PLAN_TYPES = new Set(["Actor", "Item", "Scene", "JournalEntry"]);
 const DOCUMENT_CHANGE_ACTIONS = new Set(["create", "update"]);
 const DOCUMENT_CHANGE_META_FIELDS = new Set(["action", "documentName", "id", "name", "folderType", "data"]);
+const CHAT_MESSAGE_KINDS = new Set(["notice", "handout", "gm_note", "secret_check_prompt"]);
+const CHAT_MESSAGE_AUDIENCES = new Set(["all", "gms", "players", "users"]);
+const CHAT_MESSAGE_FORMATS = new Set(["text", "html"]);
+const CHAT_MESSAGE_META_FIELDS = new Set([
+  "kind",
+  "audience",
+  "title",
+  "content",
+  "contentFormat",
+  "recipientIds",
+  "recipientNames",
+  "speakerAlias",
+  "blind",
+  "checkName",
+  "dc",
+  "subjectActorId",
+  "subjectActorName",
+  "prompt"
+]);
 const SCENE_CHANGE_ACTIONS = new Set([
   "create_token",
   "update_token",
@@ -1620,6 +1639,275 @@ function documentPlanOperation(change, index) {
   }, true, changedKeys);
 }
 
+function isGmChatUser(user) {
+  return user?.isGM === true || Number(user?.role) >= 4;
+}
+
+function chatUserSummary(user) {
+  const role = isGmChatUser(user) ? "gm" : "player";
+  return redact({
+    id: user.id,
+    name: user.name,
+    role: user.role,
+    roleLabel: role,
+    active: user.active === true,
+    isGM: role === "gm",
+    character: user.character?.id ?? user.character ?? null,
+    deliveryLabel: `${user.name} (${role}${user.active === true ? ", active" : ""})`
+  });
+}
+
+function listChatTargets(args = {}) {
+  const includeGMs = args.includeGMs !== false;
+  const includePlayers = args.includePlayers !== false;
+  const activeOnly = args.activeOnly === true;
+  const users = Array.from(game.users ?? [])
+    .filter((user) => includeGMs || !isGmChatUser(user))
+    .filter((user) => includePlayers || isGmChatUser(user))
+    .filter((user) => !activeOnly || user.active === true)
+    .map(chatUserSummary);
+  return {
+    worldId: game.world.id,
+    includeGMs,
+    includePlayers,
+    activeOnly,
+    count: users.length,
+    users
+  };
+}
+
+function normalizeChatKind(kind) {
+  const normalized = String(kind ?? "").trim().toLowerCase();
+  if (!CHAT_MESSAGE_KINDS.has(normalized)) {
+    throw new Error(`Unsupported chat message kind: ${kind || "(empty)"}`);
+  }
+  return normalized;
+}
+
+function defaultChatAudience(kind) {
+  if (kind === "handout") return "all";
+  return "gms";
+}
+
+function normalizeChatAudience(message, kind) {
+  if (kind === "gm_note") return "gms";
+  const normalized = String(message.audience ?? defaultChatAudience(kind)).trim().toLowerCase();
+  if (!CHAT_MESSAGE_AUDIENCES.has(normalized)) {
+    throw new Error(`Unsupported chat message audience: ${message.audience || "(empty)"}`);
+  }
+  return normalized;
+}
+
+function normalizeChatFormat(format) {
+  const normalized = String(format ?? "text").trim().toLowerCase();
+  if (!CHAT_MESSAGE_FORMATS.has(normalized)) {
+    throw new Error(`Unsupported chat contentFormat: ${format || "(empty)"}`);
+  }
+  return normalized;
+}
+
+function exactChatUsersByName(name) {
+  const normalized = String(name ?? "").trim().toLowerCase();
+  if (!normalized) return [];
+  return Array.from(game.users ?? []).filter((user) => user.name?.toLowerCase() === normalized);
+}
+
+function resolveChatUserRefs(ids = [], names = []) {
+  const users = new Map();
+  for (const id of ids ?? []) {
+    const normalized = String(id ?? "").trim();
+    if (!normalized) continue;
+    const user = game.users?.get(normalized);
+    if (!user) throw new Error(`Chat user not found: ${normalized}`);
+    users.set(user.id, user);
+  }
+  for (const name of names ?? []) {
+    const normalized = String(name ?? "").trim();
+    if (!normalized) continue;
+    const matches = exactChatUsersByName(normalized);
+    if (matches.length > 1) throw new Error(`Chat user name is ambiguous: ${normalized}`);
+    if (!matches.length) throw new Error(`Chat user not found: ${normalized}`);
+    users.set(matches[0].id, matches[0]);
+  }
+  return Array.from(users.values());
+}
+
+function resolveChatRecipients(message, audience) {
+  if (audience === "all") {
+    return {
+      whisper: undefined,
+      recipients: [],
+      delivery: "all"
+    };
+  }
+
+  let users = [];
+  if (audience === "gms") {
+    users = Array.from(game.users ?? []).filter(isGmChatUser);
+  } else if (audience === "players") {
+    users = Array.from(game.users ?? []).filter((user) => !isGmChatUser(user));
+  } else {
+    users = resolveChatUserRefs(message.recipientIds, message.recipientNames);
+  }
+
+  if (!users.length) throw new Error(`Chat audience resolved to no users: ${audience}`);
+  return {
+    whisper: users.map((user) => user.id),
+    recipients: users.map(chatUserSummary),
+    delivery: audience
+  };
+}
+
+function chatTextToHtml(value) {
+  return escapeHtml(value).replace(/\r?\n/g, "<br>");
+}
+
+function formatChatBody(title, content, contentFormat) {
+  const parts = [];
+  const normalizedTitle = String(title ?? "").trim();
+  if (normalizedTitle) parts.push(`<h3>${escapeHtml(normalizedTitle)}</h3>`);
+  const body = contentFormat === "html" ? String(content ?? "") : chatTextToHtml(content);
+  if (body.trim()) parts.push(body);
+  return parts.join("\n");
+}
+
+function resolveSecretCheckActor(message = {}) {
+  if (message.subjectActorId) {
+    const actor = game.actors.get(message.subjectActorId);
+    if (!actor) throw new Error(`Actor not found: ${message.subjectActorId}`);
+    return actor;
+  }
+  if (message.subjectActorName) {
+    const matches = actorsByName(message.subjectActorName);
+    if (matches.length > 1) throw new Error(`Actor name is ambiguous: ${message.subjectActorName}`);
+    if (!matches.length) throw new Error(`Actor not found: ${message.subjectActorName}`);
+    return matches[0];
+  }
+  return null;
+}
+
+function formatSecretCheckPrompt(message, contentFormat) {
+  const checkName = String(message.checkName ?? "").trim();
+  const prompt = String(message.prompt ?? "").trim();
+  const content = String(message.content ?? "").trim();
+  if (!checkName && !prompt && !content) {
+    throw new Error("secret_check_prompt requires checkName, prompt, or content.");
+  }
+
+  const actor = resolveSecretCheckActor(message);
+  const lines = [];
+  if (checkName) lines.push(`<strong>Secret check:</strong> ${escapeHtml(checkName)}`);
+  if (actor) lines.push(`<strong>Subject:</strong> ${escapeHtml(actor.name)}`);
+  if (message.dc != null && String(message.dc).trim()) lines.push(`<strong>DC:</strong> ${escapeHtml(message.dc)}`);
+  if (prompt) lines.push(`<strong>Prompt:</strong> ${escapeHtml(prompt)}`);
+  if (content) {
+    lines.push(contentFormat === "html" ? String(message.content) : chatTextToHtml(message.content));
+  }
+  return {
+    actor,
+    content: formatChatBody(message.title ?? "Secret Check Prompt", lines.join("<br>"), "html")
+  };
+}
+
+function buildChatMessageContent(message, kind, contentFormat) {
+  if (kind === "secret_check_prompt") return formatSecretCheckPrompt(message, contentFormat);
+  const content = String(message.content ?? "");
+  if (!content.trim()) throw new Error(`${kind} requires non-empty content.`);
+  return {
+    actor: null,
+    content: formatChatBody(message.title, content, contentFormat)
+  };
+}
+
+function chatMessagePlanPreview(operation) {
+  const target = operation.target ?? {};
+  const data = operation.data ?? {};
+  return redact({
+    kind: target.kind ?? null,
+    audience: target.audience ?? null,
+    recipients: target.recipients ?? [],
+    whisperCount: Array.isArray(data.whisper) ? data.whisper.length : 0,
+    blind: data.blind === true,
+    speakerAlias: data.speaker?.alias ?? null,
+    contentLength: String(data.content ?? "").length,
+    textPreview: stripHtml(data.content ?? "")
+  });
+}
+
+function chatMessageDocumentPreview(message) {
+  return redact({
+    id: message?.id ?? message?._id ?? null,
+    uuid: message?.uuid ?? null,
+    speakerAlias: message?.speaker?.alias ?? null,
+    whisperCount: Array.isArray(message?.whisper) ? message.whisper.length : 0,
+    blind: message?.blind === true,
+    contentLength: String(message?.content ?? "").length,
+    textPreview: stripHtml(message?.content ?? "")
+  });
+}
+
+function compactChatSpeaker(speaker = {}) {
+  const output = {};
+  for (const [key, value] of Object.entries(speaker ?? {})) {
+    if (value !== undefined && value !== null) output[key] = value;
+  }
+  return output;
+}
+
+function chatPlanOperation(message, index, warnings) {
+  if (!message || typeof message !== "object" || Array.isArray(message)) {
+    throw new Error("Chat message plan entry must be an object.");
+  }
+  const unknownFields = Object.keys(message).filter((key) => !CHAT_MESSAGE_META_FIELDS.has(key));
+  if (unknownFields.length) throw new Error(`chat message has unsupported field(s): ${unknownFields.join(", ")}`);
+
+  const opId = `op${index + 1}`;
+  const kind = normalizeChatKind(message.kind);
+  const audience = normalizeChatAudience(message, kind);
+  const contentFormat = normalizeChatFormat(message.contentFormat);
+  const resolved = resolveChatRecipients(message, audience);
+  const formatted = buildChatMessageContent(message, kind, contentFormat);
+  const blind = message.blind ?? (kind === "gm_note" || kind === "secret_check_prompt");
+  if (blind === true && audience !== "gms" && audience !== "users") {
+    throw new Error("Blind chat messages may only target gms or explicit users.");
+  }
+
+  const speaker = ChatMessage.getSpeaker();
+  const speakerAlias = String(message.speakerAlias ?? "").trim();
+  if (speakerAlias) speaker.alias = speakerAlias;
+  if (kind === "secret_check_prompt" && formatted.actor) {
+    speaker.actor = formatted.actor.id;
+    if (!speakerAlias) speaker.alias = formatted.actor.name;
+  }
+
+  const data = {
+    content: formatted.content,
+    speaker: compactChatSpeaker(speaker),
+    blind
+  };
+  if (resolved.whisper) data.whisper = resolved.whisper;
+
+  const target = {
+    documentName: "ChatMessage",
+    kind,
+    audience,
+    delivery: resolved.delivery,
+    recipients: resolved.recipients
+  };
+  if (kind === "secret_check_prompt") {
+    target.checkName = message.checkName ?? null;
+    target.dc = message.dc ?? null;
+    target.subjectActorId = formatted.actor?.id ?? null;
+    target.subjectActorName = formatted.actor?.name ?? null;
+  }
+  if (contentFormat === "html") warnings.push(`${opId}: contentFormat html was accepted explicitly.`);
+
+  const operation = makePlanOperation(opId, "chat.create_message", target, data, {}, false);
+  operation.before = null;
+  operation.after = chatMessagePlanPreview(operation);
+  return redact(operation);
+}
+
 function operationPreview(operation) {
   return {
     before: operation.before ?? null,
@@ -1872,10 +2160,37 @@ async function planDocumentChanges(args = {}) {
   });
 }
 
+async function planChatMessages(args = {}) {
+  const messages = Array.isArray(args.messages) ? args.messages : [];
+  if (!messages.length) throw new Error("plan_chat_messages requires at least one message.");
+
+  const createdAt = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + BRIDGE_PLAN_TTL_MS).toISOString();
+  const warnings = [];
+  const operations = messages.map((message, index) => chatPlanOperation(message, index, warnings));
+  return finalizeBridgePlan({
+    kind: "bridge-plan",
+    source: "plan_chat_messages",
+    version: 1,
+    planId: null,
+    worldId: game.world.id,
+    createdAt,
+    expiresAt,
+    action: "chat_messages",
+    summary: `chat_messages (${operations.length} chat message${operations.length === 1 ? "" : "s"})`,
+    requiresBackup: false,
+    operations,
+    warnings,
+    targets: {
+      messages: operations.map((operation) => operation.target)
+    }
+  });
+}
+
 function assertBridgePlanConfirmation(plan, confirmation = {}) {
   if (!plan || typeof plan !== "object") throw new Error("apply_bridge_plan requires plan.");
   if (plan.kind !== "bridge-plan" || !SUPPORTED_PLAN_SOURCES.has(plan.source) || plan.version !== 1) {
-    throw new Error("apply_bridge_plan only accepts version 1 plans produced by plan_journal_changes, plan_scene_changes, or plan_document_changes.");
+    throw new Error("apply_bridge_plan only accepts version 1 plans produced by plan_journal_changes, plan_scene_changes, plan_document_changes, or plan_chat_messages.");
   }
   if (!Array.isArray(plan.operations) || !plan.operations.length) {
     throw new Error("apply_bridge_plan requires at least one operation.");
@@ -1956,6 +2271,24 @@ async function applyDocumentPlanOperation(operation) {
   throw new Error(`Unsupported bridge plan operation: ${operation.type}`);
 }
 
+async function applyChatPlanOperation(operation) {
+  if (operation.type !== "chat.create_message") {
+    throw new Error(`Unsupported bridge plan operation: ${operation.type}`);
+  }
+  const message = await ChatMessage.create({
+    content: operation.data?.content ?? "",
+    speaker: operation.data?.speaker ?? ChatMessage.getSpeaker(),
+    whisper: operation.data?.whisper,
+    blind: operation.data?.blind
+  });
+  return {
+    opId: operation.opId,
+    type: operation.type,
+    ok: true,
+    document: chatMessageDocumentPreview(message)
+  };
+}
+
 async function applyBridgePlan(args = {}) {
   const plan = args.plan;
   assertBridgePlanConfirmation(plan, args.confirmation ?? {});
@@ -1988,6 +2321,8 @@ async function applyBridgePlan(args = {}) {
       results.push(await applyScenePlanOperation(operation));
     } else if (operation.type.startsWith("document.")) {
       results.push(await applyDocumentPlanOperation(operation));
+    } else if (operation.type.startsWith("chat.")) {
+      results.push(await applyChatPlanOperation(operation));
     } else {
       throw new Error(`Unsupported bridge plan operation: ${operation.type}`);
     }
@@ -2178,6 +2513,9 @@ async function handleBridgeRequest(method, args = {}) {
         character: user.character?.id ?? user.character
       }));
 
+    case "list_chat_targets":
+      return listChatTargets(args);
+
     case "read_settings": {
       const namespace = args.namespace ? String(args.namespace) : null;
       const settings = [];
@@ -2220,6 +2558,9 @@ async function handleBridgeRequest(method, args = {}) {
 
     case "plan_document_changes":
       return planDocumentChanges(args);
+
+    case "plan_chat_messages":
+      return planChatMessages(args);
 
     case "apply_bridge_plan":
       return applyBridgePlan(args);

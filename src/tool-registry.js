@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
-export const BRIDGE_VERSION = "0.2.11";
+export const BRIDGE_VERSION = "0.2.12";
 export const TOOL_REGISTRY_VERSION = 1;
 
 const AnyJson = z.any().optional();
@@ -37,6 +37,22 @@ const DocumentChangeObject = z.object({
   name: z.string().optional(),
   folderType: z.string().optional(),
   data: z.record(z.string(), z.any())
+});
+const ChatMessagePlanObject = z.object({
+  kind: z.string(),
+  audience: z.string().optional(),
+  title: z.string().optional(),
+  content: z.string().optional(),
+  contentFormat: z.string().optional(),
+  recipientIds: z.array(z.string()).optional(),
+  recipientNames: z.array(z.string()).optional(),
+  speakerAlias: z.string().optional(),
+  blind: z.boolean().optional(),
+  checkName: z.string().optional(),
+  dc: z.union([z.string(), z.number()]).optional(),
+  subjectActorId: z.string().optional(),
+  subjectActorName: z.string().optional(),
+  prompt: z.string().optional()
 });
 
 const CATEGORY = {
@@ -290,6 +306,19 @@ export const TOOL_DEFINITIONS = [
     ...capabilityMetadata(CATEGORY.liveRead, "UserSummary[]")
   },
   {
+    name: "list_chat_targets",
+    title: "List chat targets",
+    description: "List compact live Foundry chat delivery targets for GM, player, and active-user messages.",
+    inputSchema: {
+      includeGMs: z.boolean().optional(),
+      includePlayers: z.boolean().optional(),
+      activeOnly: z.boolean().optional()
+    },
+    risk: "read",
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.liveRead, "ChatTargetSummary[]")
+  },
+  {
     name: "read_settings",
     title: "Read settings",
     description: "Read live Foundry settings with sensitive fields redacted.",
@@ -402,6 +431,17 @@ export const TOOL_DEFINITIONS = [
     description: "Preview Actor, Item, Scene, and Folder create/update operations without mutating the world.",
     inputSchema: {
       changes: z.array(DocumentChangeObject)
+    },
+    risk: "read",
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.transaction, "BridgePlan")
+  },
+  {
+    name: "plan_chat_messages",
+    title: "Plan chat messages",
+    description: "Preview high-level Foundry chat notices, handouts, GM notes, and secret-check prompts without posting them.",
+    inputSchema: {
+      messages: z.array(ChatMessagePlanObject)
     },
     risk: "read",
     requiresTrustedSession: true,

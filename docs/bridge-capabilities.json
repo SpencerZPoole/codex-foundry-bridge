@@ -1,8 +1,8 @@
 {
-  "bridgeVersion": "0.2.11",
+  "bridgeVersion": "0.2.12",
   "registryVersion": 1,
-  "checksum": "dfff6baee51a36d3c5dae4597ccac5287ee60955270cf5e4e194e9b79f6d18a1",
-  "toolCount": 45,
+  "checksum": "5f1bdad1f3e858e239d7d3258119f5c647cbcf9df3d73b8be077580031420be4",
+  "toolCount": 47,
   "fallback": {
     "tool": "call_bridge_tool",
     "note": "Use call_bridge_tool when direct MCP discovery lags; the target tool's normal safety gates still apply."
@@ -308,6 +308,23 @@
       "inputKeys": []
     },
     {
+      "name": "list_chat_targets",
+      "title": "List chat targets",
+      "description": "List compact live Foundry chat delivery targets for GM, player, and active-user messages.",
+      "category": "live-read",
+      "outputShape": "ChatTargetSummary[]",
+      "risk": "read",
+      "readOnly": true,
+      "requiresTrustedSession": true,
+      "directMcpExposure": true,
+      "fallbackCallable": true,
+      "inputKeys": [
+        "activeOnly",
+        "includeGMs",
+        "includePlayers"
+      ]
+    },
+    {
       "name": "read_settings",
       "title": "Read settings",
       "description": "Read live Foundry settings with sensitive fields redacted.",
@@ -453,6 +470,21 @@
       "fallbackCallable": true,
       "inputKeys": [
         "changes"
+      ]
+    },
+    {
+      "name": "plan_chat_messages",
+      "title": "Plan chat messages",
+      "description": "Preview high-level Foundry chat notices, handouts, GM notes, and secret-check prompts without posting them.",
+      "category": "transaction",
+      "outputShape": "BridgePlan",
+      "risk": "read",
+      "readOnly": true,
+      "requiresTrustedSession": true,
+      "directMcpExposure": true,
+      "fallbackCallable": true,
+      "inputKeys": [
+        "messages"
       ]
     },
     {

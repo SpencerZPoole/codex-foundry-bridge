@@ -4,7 +4,7 @@ Last verified: 2026-05-21
 
 ## Summary
 
-`FoundryCodexBridge` is currently a strong local-only FoundryVTT control bridge, not just a proof of concept. Version `0.2.11` exposes a shared registry of 45 MCP/daemon tools, supports direct MCP discovery plus `call_bridge_tool` fallback dispatch, includes a guarded local Foundry app lifecycle restart workflow for explicit worlds, adds high-level read-only live-world intelligence, and now supports previewable journal/page, scene token/light/note, and typed top-level document transactions.
+`FoundryCodexBridge` is currently a strong local-only FoundryVTT control bridge, not just a proof of concept. Version `0.2.12` exposes a shared registry of 47 MCP/daemon tools, supports direct MCP discovery plus `call_bridge_tool` fallback dispatch, includes a guarded local Foundry app lifecycle restart workflow for explicit worlds, adds high-level read-only live-world intelligence, and now supports previewable journal/page, scene token/light/note, typed top-level document, and chat message transactions.
 
 The v1.0 release goal is **Guarded Power**: expand practical live-project ability substantially while preserving the current safety model: localhost daemon, bridge token, trusted GM session gate, redaction, backups before destructive edits, and explicit `dangerous=true` for raw GM script execution.
 
@@ -14,16 +14,16 @@ This document is the durable local roadmap. Keep it updated as v1.0 work lands.
 
 ### Verified State
 
-- Bridge/package/module version: `0.2.11`
+- Bridge/package/module version: `0.2.12`
 - Registry version: `1`
-- Registry checksum: `dfff6baee51a36d3c5dae4597ccac5287ee60955270cf5e4e194e9b79f6d18a1`
-- Registered tools: `45`
+- Registry checksum: `5f1bdad1f3e858e239d7d3258119f5c647cbcf9df3d73b8be077580031420be4`
+- Registered tools: `47`
 - Live validation world: `scratch`
 - Live Foundry: `14.361`
 - Live system: `D35E 3.0.2`
-- Live bridge status: daemon verified at `0.2.11`; `bridge_self_check.ready=true`
-- Live module script version: `0.2.11`
-- Installed module manifest file version: `0.2.11`
+- Live bridge status: daemon verified at `0.2.12`; `bridge_self_check.ready=true`
+- Live module script version: `0.2.12`
+- Installed module manifest file version: `0.2.12`
 - Trusted GM sessions: `2` after visible Electron GM login plus managed bridge GM client restart validation
 - Runtime event health: no errors; Foundry deprecation warnings only from compatibility/runtime read paths
 - Current self-check action items: none
@@ -45,11 +45,12 @@ The bridge currently provides:
 | Previewable journal transactions | `plan_journal_changes`, `apply_bridge_plan` | Added in `0.2.9`; JournalEntry/Page create/update/append preview with explicit confirmed apply |
 | Previewable scene prep transactions | `plan_scene_changes`, `apply_bridge_plan` | Added in `0.2.10`; scene token/light/note create/update preview with explicit confirmed apply |
 | Previewable top-level document transactions | `plan_document_changes`, `apply_bridge_plan` | Added in `0.2.11`; Actor/Item/Scene/Folder create/update preview with explicit confirmed apply |
+| Previewable chat message transactions | `list_chat_targets`, `plan_chat_messages`, `apply_bridge_plan` | Added in `0.2.12`; GM notes, notices, handouts, and secret-check prompt messages preview with explicit confirmed apply |
 | World/user/settings reads | `list_users`, `read_settings`, `export_world_snapshot` | Useful, redacted, still shallow |
 | Runtime diagnostics | `tail_logs`, `get_runtime_events`, `get_runtime_timeline`, `clear_runtime_events` | Good bounded live-session visibility, not persisted to disk |
 | World mutation | `create_document`, `update_document`, `create_embedded_document`, `update_embedded_document` | Powerful but low-level |
 | Destructive mutation | `delete_document`, `delete_embedded_document` | Backup-first, still needs rollback browsing/apply metadata |
-| Chat/macros/scripts | `create_chat_message`, `run_macro`, `run_gm_script` | Powerful; `run_gm_script` remains emergency-only |
+| Chat/macros/scripts | `create_chat_message`, `list_chat_targets`, `plan_chat_messages`, `run_macro`, `run_gm_script` | Chat now has a first guarded workflow; macros/scripts remain powerful and `run_gm_script` remains emergency-only |
 | Local lifecycle | `restart_foundry_world` | Guarded full-app restart and GM auto-login for explicit trusted worlds |
 | Local maintenance | `list_installed_packages`, `read_foundry_options_sanitized`, `list_trusted_worlds`, `revoke_trusted_world`, `backup_world`, `install_or_update_bridge_module` | Practical local ops baseline |
 
@@ -72,7 +73,7 @@ The bridge currently provides:
 
 - Most write tools are raw Foundry document operations, so practical GM workflows still require knowing collection names, document shapes, and update payload structure.
 - The preview/diff/apply transaction model currently covers journal entry/page create/update/append operations and first-pass scene token/light/note prep; broader document, wall, scene activation, macro, and compendium workflows still rely on low-level tools.
-- There are no high-level guarded workflows yet for encounter setup packages, secret checks, macro authoring, compendium imports, actor/item patching, walls, or full rollback browsing.
+- There are no high-level guarded workflows yet for encounter setup packages, actual secret roll execution, macro authoring, compendium imports, actor/item patching, walls, or full rollback browsing.
 - Complex arguments are still exposed with broad schemas in several places, which weakens MCP usability and makes client-side validation thin.
 - `call_bridge_tool.args` works as a daemon object payload, but direct MCP exposure can be awkward in clients that flatten object args.
 - Output is mostly free-form JSON text; important tools do not yet provide structured output schemas.
@@ -237,6 +238,8 @@ Live findings from the `scratch` Slice 5 validation pass:
 
 ### Milestone 4: GM Workflow Tools
 
+Status: started with the `0.2.12` previewable chat message helper slice.
+
 Goal: replace raw script/document work with practical guarded tools for live campaign prep and session operation.
 
 Deliverables:
@@ -244,15 +247,31 @@ Deliverables:
 - Journal/page tools for create, update, append section, reorder pages, and retrieve stable IDs.
 - Scene prep tools for token placement, token relinking, lights, notes, folders, and visibility setup.
 - Actor/item helpers for compact patching, embedded item add/update, token prototype sync, and ownership review.
-- Chat helpers for GM whispers, blind/secret checks, player-facing handouts, and roll-result summaries.
+- Started in `0.2.12`: `list_chat_targets` lists compact GM/player delivery targets, and `plan_chat_messages` previews notices, handouts, GM notes, and secret-check prompt messages.
+- Still pending: actual secret roll execution, roll-result summaries, richer player notification policy, and broader session-facing chat workflow polish.
 - Compendium import helpers for copy-to-world with preview, duplicate detection, folder placement, and source metadata.
 - Macro helpers for install/update/run by stable name, with dry-run preview and script body hashing.
 
 Acceptance:
 
+- Completed in `0.2.12`: chat helper planning is trusted-session gated, directly MCP exposed, fallback-callable, and applied only through `apply_bridge_plan` confirmation.
+- Completed in `0.2.12`: secret-check prompts are message-only reminders; they do not roll dice, calculate D35E mechanics, mutate actors, or add script powers.
+- Completed in `0.2.12`: text chat content is escaped by default, with explicit `contentFormat: "html"` available for trusted GM-authored Foundry chat HTML.
 - Each workflow has a read-only preview path and a guarded apply path.
 - Each workflow returns stable IDs and a concise verification summary.
 - No tool silently writes to `return-to-undermountain` during v1 validation.
+
+Live findings from the `scratch` Slice 6 validation pass:
+
+- Confirmed `restart_foundry_world({ worldId: "scratch", dangerous: true })` reloaded the installed `0.2.12` module into both the visible Foundry app and managed GM client.
+- Confirmed `bridge_self_check.ready=true`, active daemon world `scratch`, Foundry `14.361`, D35E `3.0.2`, module/script/manifest version `0.2.12`, 2 trusted GM sessions, and registry checksum `5f1bdad1f3e858e239d7d3258119f5c647cbcf9df3d73b8be077580031420be4`.
+- Confirmed `list_bridge_tools` exposes 47 tools and includes `list_chat_targets` plus `plan_chat_messages` with trusted-session gating, direct MCP exposure, and fallback-callable metadata.
+- Confirmed `list_chat_targets` returned 1 compact chat target in the `scratch` world.
+- Confirmed `plan_chat_messages -> chat.create_message` and `apply_bridge_plan` posted a disposable blind GM note, then read it back from the `messages` collection with speaker alias `Codex Validation`.
+- Confirmed `plan_chat_messages -> secret_check_prompt` and `apply_bridge_plan` posted a disposable blind secret-check prompt with no dice roll or D35E calculation.
+- Confirmed `call_bridge_tool -> plan_chat_messages` returned a fallback preview without mutation.
+- Cleanup removed both disposable `ChatMessage` documents through existing backup-first `delete_document`; follow-up `search_documents` found 0 `Codex Slice6 Validation` chat leftovers.
+- Runtime diagnostics after validation reported 0 errors; warnings were Foundry V1 Application deprecation warnings only.
 
 ### Milestone 5: v1 Release Hardening
 

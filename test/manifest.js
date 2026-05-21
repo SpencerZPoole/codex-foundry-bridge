@@ -29,13 +29,19 @@ const transactionTools = [
   "plan_journal_changes",
   "plan_scene_changes",
   "plan_document_changes",
+  "plan_chat_messages",
   "apply_bridge_plan"
+];
+const chatWorkflowTools = [
+  "list_chat_targets",
+  "plan_chat_messages"
 ];
 
 assert.deepEqual(manifest, generatedManifest);
 assert.equal(manifest.bridgeVersion, BRIDGE_VERSION);
 assert.equal(manifest.checksum, toolRegistryChecksum());
 assert.equal(manifest.toolCount, TOOL_DEFINITIONS.length);
+assert.equal(manifest.toolCount, 47);
 assert.equal(manifest.tools.length, TOOL_DEFINITIONS.length);
 assert.deepEqual(
   manifest.tools.map((tool) => tool.name),
@@ -105,9 +111,29 @@ assert.equal(documentPlanTool.risk, "read");
 assert.equal(documentPlanTool.readOnly, true);
 assert.deepEqual(documentPlanTool.inputKeys, ["changes"]);
 
+const chatTargetsTool = manifest.tools.find((entry) => entry.name === "list_chat_targets");
+assert.equal(chatTargetsTool.category, "live-read");
+assert.equal(chatTargetsTool.risk, "read");
+assert.equal(chatTargetsTool.readOnly, true);
+assert.deepEqual(chatTargetsTool.inputKeys, ["activeOnly", "includeGMs", "includePlayers"]);
+
+const chatPlanTool = manifest.tools.find((entry) => entry.name === "plan_chat_messages");
+assert.equal(chatPlanTool.category, "transaction");
+assert.equal(chatPlanTool.risk, "read");
+assert.equal(chatPlanTool.readOnly, true);
+assert.deepEqual(chatPlanTool.inputKeys, ["messages"]);
+
 const applyPlanTool = manifest.tools.find((entry) => entry.name === "apply_bridge_plan");
 assert.equal(applyPlanTool.risk, "write");
 assert.equal(applyPlanTool.readOnly, false);
+
+for (const name of chatWorkflowTools) {
+  const tool = manifest.tools.find((entry) => entry.name === name);
+  assert.ok(tool, `Manifest missing chat workflow tool: ${name}`);
+  assert.equal(tool.requiresTrustedSession, true, `${name} trusted session gate`);
+  assert.equal(tool.directMcpExposure, true, `${name} direct MCP exposure`);
+  assert.equal(tool.fallbackCallable, true, `${name} fallback callable`);
+}
 
 const client = new Client({ name: "foundry-codex-bridge-manifest", version: "0.0.0" });
 const transport = new StdioClientTransport({
@@ -146,6 +172,11 @@ try {
   assert.equal(fallbackArgsSchema.type, "object");
   assert.equal(fallbackArgsSchema.additionalProperties.constructor, Object);
   assert.equal(fallbackArgsSchema.propertyNames.type, "string");
+
+  const planChatSchema = mcpToolsByName.get("plan_chat_messages").inputSchema.properties.messages;
+  assert.equal(planChatSchema.type, "array");
+  assert.equal(planChatSchema.items.type, "object");
+  assert.ok(planChatSchema.items.properties.kind);
 } finally {
   await client.close();
 }

@@ -31,7 +31,12 @@ const transactionTools = [
   "plan_journal_changes",
   "plan_scene_changes",
   "plan_document_changes",
+  "plan_chat_messages",
   "apply_bridge_plan"
+];
+const chatWorkflowTools = [
+  "list_chat_targets",
+  "plan_chat_messages"
 ];
 
 fs.mkdirSync(path.join(foundryDataDir, "Data", "worlds", dynamicWorldId), { recursive: true });
@@ -47,6 +52,10 @@ for (const method of highLevelReadTools) {
 for (const method of transactionTools) {
   assert.ok(registeredToolNames.includes(method), `${method} should be registered`);
 }
+for (const method of chatWorkflowTools) {
+  assert.ok(registeredToolNames.includes(method), `${method} should be registered`);
+}
+assert.equal(registeredToolNames.length, 47);
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -155,6 +164,15 @@ function defaultPlanTarget(operationType) {
   if (operationType === "document.update") {
     return { documentName: "Item", collection: "items", id: "item-1", name: "Smoke Test Item" };
   }
+  if (operationType === "chat.create_message") {
+    return {
+      documentName: "ChatMessage",
+      kind: "gm_note",
+      audience: "gms",
+      delivery: "gms",
+      recipients: [{ id: "gm", name: "Gamemaster", isGM: true }]
+    };
+  }
   return { documentName: "Unknown" };
 }
 
@@ -169,12 +187,21 @@ function defaultPlanData(operationType) {
   if (operationType === "scene.update_note") return { _id: "note-1", x: 160, y: 160, text: "Updated smoke note" };
   if (operationType === "document.create") return { name: "Smoke Test Item", type: "loot", img: "icons/svg/item-bag.svg" };
   if (operationType === "document.update") return { name: "Smoke Test Item Updated" };
+  if (operationType === "chat.create_message") {
+    return {
+      content: "<h3>Smoke GM Note</h3>\nThis is a smoke test.",
+      speaker: { alias: "Codex Smoke" },
+      whisper: ["gm"],
+      blind: true
+    };
+  }
   return {};
 }
 
 function defaultPlanSource(operationType) {
   if (operationType.startsWith("scene.")) return "plan_scene_changes";
   if (operationType.startsWith("document.")) return "plan_document_changes";
+  if (operationType.startsWith("chat.")) return "plan_chat_messages";
   return "plan_journal_changes";
 }
 
@@ -250,6 +277,53 @@ async function withMcpClient(callback) {
   }
 }
 
+function fakeFoundryResponse(message) {
+  if (message.method === "list_chat_targets") {
+    return {
+      ok: true,
+      result: {
+        method: message.method,
+        users: [
+          { id: "gm", name: "Gamemaster", isGM: true, roleLabel: "gm", active: true },
+          { id: "player", name: "Player One", isGM: false, roleLabel: "player", active: true },
+          { id: "player2", name: "Player One", isGM: false, roleLabel: "player", active: false }
+        ]
+      }
+    };
+  }
+
+  if (message.method === "plan_chat_messages") {
+    const messages = Array.isArray(message.args?.messages) ? message.args.messages : [];
+    if (!messages.length) return { ok: false, error: "plan_chat_messages requires at least one message." };
+    for (const entry of messages) {
+      if (!["notice", "handout", "gm_note", "secret_check_prompt"].includes(entry.kind)) {
+        return { ok: false, error: `Unsupported chat message kind: ${entry.kind ?? "(missing)"}` };
+      }
+      if (entry.audience && !["all", "gms", "players", "users"].includes(entry.audience)) {
+        return { ok: false, error: `Unsupported chat message audience: ${entry.audience}` };
+      }
+      if (entry.kind !== "secret_check_prompt" && !String(entry.content ?? "").trim()) {
+        return { ok: false, error: `${entry.kind} requires non-empty content.` };
+      }
+      if (entry.audience === "users" && !(entry.recipientIds?.length || entry.recipientNames?.length)) {
+        return { ok: false, error: "Chat audience resolved to no users: users" };
+      }
+      if (entry.recipientNames?.includes("Player One")) {
+        return { ok: false, error: "Chat user name is ambiguous: Player One" };
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    result: {
+      connected: true,
+      world: { id: dynamicWorldId, title: "Dynamic Smoke World" },
+      method: message.method
+    }
+  };
+}
+
 const child = spawn(process.execPath, ["src/server.js"], {
   cwd: projectRoot,
   env: {
@@ -286,6 +360,11 @@ try {
     assert.equal(tool.directMcpExposure, true, `${method} should be directly exposed through MCP`);
     assert.equal(tool.fallbackCallable, true, `${method} should be fallback-callable`);
   }
+  const chatTargetsTool = toolsCall.body.result.tools.find((entry) => entry.name === "list_chat_targets");
+  assert.equal(chatTargetsTool.category, "live-read");
+  assert.equal(chatTargetsTool.readOnly, true);
+  assert.equal(chatTargetsTool.requiresTrustedSession, true);
+  assert.equal(chatTargetsTool.fallbackCallable, true);
   const planTool = toolsCall.body.result.tools.find((entry) => entry.name === "plan_journal_changes");
   assert.equal(planTool.category, "transaction");
   assert.equal(planTool.readOnly, true);
@@ -301,6 +380,11 @@ try {
   assert.equal(documentPlanTool.readOnly, true);
   assert.equal(documentPlanTool.requiresTrustedSession, true);
   assert.equal(documentPlanTool.fallbackCallable, true);
+  const chatPlanTool = toolsCall.body.result.tools.find((entry) => entry.name === "plan_chat_messages");
+  assert.equal(chatPlanTool.category, "transaction");
+  assert.equal(chatPlanTool.readOnly, true);
+  assert.equal(chatPlanTool.requiresTrustedSession, true);
+  assert.equal(chatPlanTool.fallbackCallable, true);
   const applyTool = toolsCall.body.result.tools.find((entry) => entry.name === "apply_bridge_plan");
   assert.equal(applyTool.category, "transaction");
   assert.equal(applyTool.readOnly, false);
@@ -384,15 +468,13 @@ try {
   gm.on("message", (data) => {
     const message = JSON.parse(String(data));
     if (message.type !== "request") return;
+    const fake = fakeFoundryResponse(message);
     gm.send(JSON.stringify({
       type: "response",
       id: message.id,
-      ok: true,
-      result: {
-        connected: true,
-        world: { id: dynamicWorldId, title: "Dynamic Smoke World" },
-        method: message.method
-      }
+      ok: fake.ok,
+      result: fake.result,
+      error: fake.error
     }));
   });
   await new Promise((resolve) => gm.on("open", resolve));
@@ -438,6 +520,10 @@ try {
     assert.match(refusedFallbackHighLevelRead.body.error, /trusted GM Foundry bridge session/);
   }
 
+  const refusedChatTargets = await callBridge("list_chat_targets", {}, { expectOk: false });
+  assert.equal(refusedChatTargets.response.status, 500);
+  assert.match(refusedChatTargets.body.error, /trusted GM Foundry bridge session/);
+
   const refusedPlanJournal = await callBridge("plan_journal_changes", {
     action: "create_entry",
     entryName: "Smoke Test Journal"
@@ -456,6 +542,19 @@ try {
   }, { expectOk: false });
   assert.equal(refusedPlanDocument.response.status, 500);
   assert.match(refusedPlanDocument.body.error, /trusted GM Foundry bridge session/);
+
+  const refusedPlanChat = await callBridge("plan_chat_messages", {
+    messages: [{ kind: "gm_note", content: "Smoke GM note" }]
+  }, { expectOk: false });
+  assert.equal(refusedPlanChat.response.status, 500);
+  assert.match(refusedPlanChat.body.error, /trusted GM Foundry bridge session/);
+
+  const refusedFallbackPlanChat = await callBridge("call_bridge_tool", {
+    method: "plan_chat_messages",
+    args: { messages: [{ kind: "gm_note", content: "Smoke GM note" }] }
+  }, { expectOk: false });
+  assert.equal(refusedFallbackPlanChat.response.status, 500);
+  assert.match(refusedFallbackPlanChat.body.error, /trusted GM Foundry bridge session/);
 
   const preTrustPlan = makeBridgePlan();
   const refusedApplyPlan = await callBridge("apply_bridge_plan", {
@@ -553,6 +652,10 @@ try {
     assert.equal(fallbackCall.body.result.method, method);
   }
 
+  const chatTargets = await callBridge("list_chat_targets");
+  assert.equal(chatTargets.body.result.method, "list_chat_targets");
+  assert.equal(chatTargets.body.result.users.length, 3);
+
   const plannedJournal = await callBridge("plan_journal_changes", {
     action: "create_entry",
     entryName: "Smoke Test Journal"
@@ -582,6 +685,48 @@ try {
     }
   });
   assert.equal(plannedDocumentViaFallback.body.result.method, "plan_document_changes");
+
+  const plannedChat = await callBridge("plan_chat_messages", {
+    messages: [{ kind: "gm_note", content: "Smoke GM note" }]
+  });
+  assert.equal(plannedChat.body.result.method, "plan_chat_messages");
+  const plannedChatViaFallback = await callBridge("call_bridge_tool", {
+    method: "plan_chat_messages",
+    args: {
+      messages: [{ kind: "secret_check_prompt", checkName: "Listen", dc: 15, prompt: "Resolve privately." }]
+    }
+  });
+  assert.equal(plannedChatViaFallback.body.result.method, "plan_chat_messages");
+
+  const unknownChatKind = await callBridge("plan_chat_messages", {
+    messages: [{ kind: "unknown", content: "Smoke" }]
+  }, { expectOk: false });
+  assert.equal(unknownChatKind.response.status, 500);
+  assert.match(unknownChatKind.body.error, /Unsupported chat message kind/);
+
+  const unknownChatAudience = await callBridge("plan_chat_messages", {
+    messages: [{ kind: "notice", audience: "everyone-nearby", content: "Smoke" }]
+  }, { expectOk: false });
+  assert.equal(unknownChatAudience.response.status, 500);
+  assert.match(unknownChatAudience.body.error, /Unsupported chat message audience/);
+
+  const emptyChatContent = await callBridge("plan_chat_messages", {
+    messages: [{ kind: "gm_note", content: "" }]
+  }, { expectOk: false });
+  assert.equal(emptyChatContent.response.status, 500);
+  assert.match(emptyChatContent.body.error, /non-empty content/);
+
+  const missingChatUsers = await callBridge("plan_chat_messages", {
+    messages: [{ kind: "notice", audience: "users", content: "Smoke" }]
+  }, { expectOk: false });
+  assert.equal(missingChatUsers.response.status, 500);
+  assert.match(missingChatUsers.body.error, /no users/);
+
+  const ambiguousChatUsers = await callBridge("plan_chat_messages", {
+    messages: [{ kind: "notice", audience: "users", recipientNames: ["Player One"], content: "Smoke" }]
+  }, { expectOk: false });
+  assert.equal(ambiguousChatUsers.response.status, 500);
+  assert.match(ambiguousChatUsers.body.error, /ambiguous/);
 
   const createPlan = makeBridgePlan();
   const missingConfirmation = await callBridge("apply_bridge_plan", {
@@ -716,13 +861,81 @@ try {
   assert.equal(missingDocumentTarget.response.status, 500);
   assert.match(missingDocumentTarget.body.error, /document id/);
 
+  const unsupportedChatKindPlan = makeBridgePlan({
+    operationType: "chat.create_message",
+    operation: {
+      opId: "op1",
+      type: "chat.create_message",
+      target: { documentName: "ChatMessage", kind: "unknown", audience: "gms" },
+      data: { content: "Smoke", whisper: ["gm"], blind: true },
+      backupRequired: false
+    }
+  });
+  const unsupportedChatKind = await callBridge("apply_bridge_plan", {
+    plan: unsupportedChatKindPlan,
+    confirmation: confirmationForPlan(unsupportedChatKindPlan)
+  }, { expectOk: false });
+  assert.equal(unsupportedChatKind.response.status, 500);
+  assert.match(unsupportedChatKind.body.error, /Unsupported chat message kind/);
+
+  const unsupportedChatAudiencePlan = makeBridgePlan({
+    operationType: "chat.create_message",
+    operation: {
+      opId: "op1",
+      type: "chat.create_message",
+      target: { documentName: "ChatMessage", kind: "notice", audience: "everyone-nearby" },
+      data: { content: "Smoke" },
+      backupRequired: false
+    }
+  });
+  const unsupportedChatAudience = await callBridge("apply_bridge_plan", {
+    plan: unsupportedChatAudiencePlan,
+    confirmation: confirmationForPlan(unsupportedChatAudiencePlan)
+  }, { expectOk: false });
+  assert.equal(unsupportedChatAudience.response.status, 500);
+  assert.match(unsupportedChatAudience.body.error, /Unsupported chat message audience/);
+
+  const emptyChatContentPlan = makeBridgePlan({
+    operationType: "chat.create_message",
+    operation: {
+      opId: "op1",
+      type: "chat.create_message",
+      target: { documentName: "ChatMessage", kind: "gm_note", audience: "gms" },
+      data: { content: "" },
+      backupRequired: false
+    }
+  });
+  const emptyChatApply = await callBridge("apply_bridge_plan", {
+    plan: emptyChatContentPlan,
+    confirmation: confirmationForPlan(emptyChatContentPlan)
+  }, { expectOk: false });
+  assert.equal(emptyChatApply.response.status, 500);
+  assert.match(emptyChatApply.body.error, /non-empty chat content/);
+
+  const missingChatRecipientPlan = makeBridgePlan({
+    operationType: "chat.create_message",
+    operation: {
+      opId: "op1",
+      type: "chat.create_message",
+      target: { documentName: "ChatMessage", kind: "notice", audience: "users" },
+      data: { content: "Smoke" },
+      backupRequired: false
+    }
+  });
+  const missingChatRecipient = await callBridge("apply_bridge_plan", {
+    plan: missingChatRecipientPlan,
+    confirmation: confirmationForPlan(missingChatRecipientPlan)
+  }, { expectOk: false });
+  assert.equal(missingChatRecipient.response.status, 500);
+  assert.match(missingChatRecipient.body.error, /chat user recipients/);
+
   const unknownSourcePlan = makeBridgePlan({ source: "plan_unknown_changes" });
   const unknownSource = await callBridge("apply_bridge_plan", {
     plan: unknownSourcePlan,
     confirmation: confirmationForPlan(unknownSourcePlan)
   }, { expectOk: false });
   assert.equal(unknownSource.response.status, 500);
-  assert.match(unknownSource.body.error, /plan_document_changes/);
+  assert.match(unknownSource.body.error, /plan_chat_messages/);
 
   const appliedViaFallback = await callBridge("call_bridge_tool", {
     method: "apply_bridge_plan",
@@ -804,6 +1017,20 @@ try {
   assert.equal(appliedDocumentUpdate.body.result.backup.ok, true);
   assert.equal(appliedDocumentUpdate.body.result.result.method, "apply_bridge_plan");
   assert.equal(JSON.stringify(appliedDocumentUpdate.body.result).includes(token), false);
+
+  const chatCreatePlan = makeBridgePlan({ operationType: "chat.create_message" });
+  const appliedChatCreate = await callBridge("call_bridge_tool", {
+    method: "apply_bridge_plan",
+    args: {
+      plan: chatCreatePlan,
+      confirmation: confirmationForPlan(chatCreatePlan)
+    }
+  });
+  assert.equal(appliedChatCreate.body.result.applied, true);
+  assert.equal(appliedChatCreate.body.result.backupRequired, false);
+  assert.equal(appliedChatCreate.body.result.backup, null);
+  assert.equal(appliedChatCreate.body.result.result.method, "apply_bridge_plan");
+  assert.equal(JSON.stringify(appliedChatCreate.body.result).includes(token), false);
 
   const revoked = await callBridge("revoke_trusted_world", { worldId: dynamicWorldId });
   assert.deepEqual(revoked.body.result, { revoked: true, worldId: dynamicWorldId });
