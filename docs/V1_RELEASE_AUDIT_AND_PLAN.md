@@ -14,7 +14,7 @@ This document is the durable local roadmap. Keep it updated as v1.0 work lands.
 
 A public-peer comparison and monetization note is tracked in `docs/MARKET_POSITIONING_AND_MONETIZATION.md`.
 
-The short version: `FoundryCodexBridge` should not try to win by being the broadest raw Foundry MCP. Public peers already expose wider general gameplay surfaces, hosted service models, installers, MCP resources, dice/combat tools, map generation, and content-generation workflows. Our strongest differentiator is **Guarded Power**: local-first operation, trusted-world gates, self-diagnostics, capability manifests, preview/apply transactions, backup-first mutation, lifecycle restart, and live validation discipline for real campaign worlds.
+The short version: `FoundryCodexBridge` should not try to win by being the broadest raw Foundry MCP. Public peers already expose wide gameplay surfaces, hosted service models, installers, MCP resources, dice/combat tools, map generation, and content-generation workflows. The bridge's strongest differentiator is **Guarded Power**: local-first operation, trusted-world gates, self-diagnostics, capability manifests, preview/apply transactions, backup-first mutation, lifecycle restart, and live validation discipline for real campaign worlds.
 
 This suggests a monetizable lane, but not as "just another Foundry MCP." The best product shape is a local-first AI GM operations assistant with paid convenience and workflow layers: installer, guided setup, managed updates, rollback browser, compendium import, session prep, session secretary, macro workflows, and system-specific packs such as D35E.
 
@@ -36,7 +36,7 @@ This suggests a monetizable lane, but not as "just another Foundry MCP." The bes
 - Runtime event health: no errors; Foundry deprecation warnings only from compatibility/runtime read paths
 - Current self-check action items: none
 
-Do not use `return-to-undermountain` for validation unless explicitly requested.
+Do not use a private production campaign world for validation unless explicitly requested.
 
 ### Tool Surface Delivered
 
@@ -110,7 +110,7 @@ For v1.0, document and preserve:
 - backup guarantees for destructive tools
 - `dangerous=true` requirement for raw GM script execution
 - `scratch` as the default validation world
-- no implicit validation or mutation of `return-to-undermountain`
+- no implicit validation or mutation of private production campaign worlds
 
 ### Lifecycle Hardening Slice
 
@@ -128,7 +128,7 @@ Live findings from the `scratch` validation pass:
 - Confirmed force-stop fallback only targets processes whose executable path exactly matches the configured Foundry executable.
 - Added stale Foundry data lock recovery for `Config/options.json.lock` after force-stop, guarded by the same exact executable-process check.
 - Confirmed Foundry 14 uses `Config/admin.txt` as the durable setup-admin lock indicator; `options.json` alone is not sufficient for admin-password detection.
-- Current validation target: `scratch` only. Do not use `return-to-undermountain` for this lifecycle validation unless explicitly requested by exact world id.
+- Current validation target: `scratch` only. Do not use a private production campaign world for this lifecycle validation unless explicitly requested by exact world id.
 
 ## v1.0 Roadmap
 
@@ -267,7 +267,7 @@ Acceptance:
 - Completed in `0.2.12`: text chat content is escaped by default, with explicit `contentFormat: "html"` available for trusted GM-authored Foundry chat HTML.
 - Each workflow has a read-only preview path and a guarded apply path.
 - Each workflow returns stable IDs and a concise verification summary.
-- No tool silently writes to `return-to-undermountain` during v1 validation.
+- No tool silently writes to a private production campaign world during v1 validation.
 
 Live findings from the `scratch` Slice 6 validation pass:
 
@@ -334,7 +334,7 @@ node --check test/manifest.js
 node --check test/lifecycle.js
 node scripts/generate-capability-manifest.mjs --check
 npm test
-node C:\Users\mrpoo\.codex\skills\local-security-gate\scripts\security-scan.mjs --root G:\DungeonsAndDragonsDMFolder\FoundryCodexBridge --changed-only
+node <path-to-local-security-gate>\scripts\security-scan.mjs --root <repo-root> --changed-only
 ```
 
 For live checks, use `scratch` unless explicitly redirected:
@@ -372,4 +372,4 @@ These are intentionally not decided in this roadmap and should be resolved immed
 - Do not remove GM-only connection requirements.
 - Do not remove trusted-world authorization.
 - Do not make `run_gm_script` easier to invoke accidentally.
-- Do not validate or mutate `return-to-undermountain` without explicit instruction.
+- Do not validate or mutate a private production campaign world without explicit instruction.

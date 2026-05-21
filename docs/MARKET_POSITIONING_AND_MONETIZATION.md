@@ -2,89 +2,84 @@
 
 Reviewed: 2026-05-21
 
-Scope: public repository documentation and the local `FoundryCodexBridge 0.2.12` capability surface. This is a product-positioning note, not a legal, financial, or exhaustive source-code audit of peer projects.
+Scope: public repository documentation and the local `FoundryCodexBridge 0.2.12` capability surface. This note compares public project positioning, not private implementation details or exhaustive source history.
 
-## Bottom Line
+## Positioning Summary
 
-`FoundryCodexBridge` is not the first Foundry MCP and should not try to win by raw tool count alone. Public peers already cover broad Foundry control, content generation, dice, combat, tokens, journals, scenes, and installer workflows.
+Foundry Codex Bridge is part of a growing ecosystem of AI-to-Foundry tooling. Public peers already demonstrate broad Foundry control, content generation, dice and combat workflows, MCP resources, hosted service models, and installer packaging.
 
-The valuable lane for this bridge is different: a local-first, safety-forward AI operations layer for serious Foundry projects. The strongest commercial story is not "AI can talk to Foundry." The stronger story is "AI can be trusted to inspect, prepare, modify, restart, verify, and recover a real campaign world without making the GM nervous."
+This project is intentionally positioned around a narrower but commercially meaningful lane: local-first, safety-forward AI operations for serious Foundry worlds.
 
-That position is best summarized as **Guarded Power**.
+The public message is **Guarded Power**:
+
+- make useful live-world work possible from Codex
+- preserve local control and GM consent
+- preview important changes before applying them
+- keep diagnostics, backups, redaction, and explicit high-risk gates close to the workflow
 
 ## Public Peer Snapshot
 
-| Project | Public posture | Where it looks stronger than us | Commercial signal |
-| --- | --- | --- | --- |
-| [adambdooley/foundry-vtt-mcp](https://github.com/adambdooley/foundry-vtt-mcp) | Broad Claude/Desktop campaign bridge with Windows/Mac installers, GM-only access, configurable permissions, many campaign-management tools, D&D 5e/PF2e-oriented helpers, and optional ComfyUI map generation. | Broader polished feature surface today: character management, token manipulation, player roll requests, quest/campaign dashboards, actor ownership, map generation, installers, and multi-system positioning. | Patreon support link, installer packaging, and media/demo posture show a clearer public-product track. |
-| [alexivenkov/foundry-api-bridge-module](https://github.com/alexivenkov/foundry-api-bridge-module) | GM-only Foundry module that connects to a hosted Foundry MCP service with Patreon/API-key setup. Covers dice/chat, actors, actor rolls, combat, tokens, items, journals, scenes, effects, roll tables, doors, and compendiums. | More direct live-session gameplay operations today, including combat and roll helpers, A* token movement around walls/doors, scene capture, effects, roll tables, and hosted-service integration. | Strongest direct monetization proof: Patreon-backed API key/service setup through `foundry-mcp.com`. |
-| [laurigates/foundryvtt-mcp](https://github.com/laurigates/foundryvtt-mcp) | MCP-native server run by `bunx`/`npx`, with a dedicated Foundry API user pattern, world search, data tools, dice, combat state, chat history, content generation, diagnostics, and `foundry://` resources. | Cleaner broad MCP resource model and easier general MCP packaging. Good developer/admin shape for querying world data and exposing resources to AI clients. | Mostly open-source/tooling signal, but the package/install ergonomics are closer to public adoption than our local private bridge. |
+| Project | Public posture | What it demonstrates |
+| --- | --- | --- |
+| [adambdooley/foundry-vtt-mcp](https://github.com/adambdooley/foundry-vtt-mcp) | Broad Claude/Desktop campaign bridge with installers, GM-only access, configurable permissions, campaign-management tools, system-oriented helpers, and optional image/map generation. | Strong public product surface, broad feature coverage, and user-friendly packaging. |
+| [alexivenkov/foundry-api-bridge-module](https://github.com/alexivenkov/foundry-api-bridge-module) | GM-only Foundry module connected to a hosted Foundry MCP service with Patreon/API-key setup. Covers dice/chat, actors, actor rolls, combat, tokens, items, journals, scenes, effects, roll tables, doors, and compendiums. | Clear evidence that hosted Foundry AI bridges can be packaged as a supported/donation-backed service. |
+| [laurigates/foundryvtt-mcp](https://github.com/laurigates/foundryvtt-mcp) | MCP-native server with a dedicated Foundry API user pattern, world search, data tools, dice, combat state, chat history, content generation, diagnostics, and `foundry://` resources. | Clean MCP ergonomics, useful resource exposure, and a strong developer/admin workflow shape. |
 
-## What We Are Doing Differently
+## Differentiators
 
-Based on public documentation, our most distinctive work is not broad Foundry API exposure. It is operational trust.
+The bridge's most distinctive work is operational trust rather than raw API breadth.
 
-- **Preview/apply transactions**: `plan_journal_changes`, `plan_scene_changes`, `plan_document_changes`, and `plan_chat_messages` return caller-held `BridgePlan` previews with `planId`, `planHash`, `worldId`, expiration, warnings, compact before/after summaries, and explicit `apply_bridge_plan` confirmation.
-- **Backup-first mutation posture**: destructive document and embedded-document operations create local backups, and existing-document transaction updates report backup metadata before mutation.
-- **Self-diagnostics**: `bridge_self_check`, `list_bridge_tools`, registry checksums, capability manifests, direct MCP exposure flags, fallback-callable flags, and runtime event summaries make drift and broken readiness visible.
-- **MCP parity fallback**: `call_bridge_tool` makes every fallback-callable registry method reachable even when direct MCP discovery lags, while still preserving each target tool's normal gates.
-- **Local lifecycle restart**: `restart_foundry_world` can fully stop Foundry, relaunch the visible app, launch an explicit world, join as GM, restore a managed bridge GM client, and verify readiness with Windows Credential Manager-backed secrets.
-- **Trusted-world security model**: the daemon is localhost-only and token-gated; live-world tools require a trusted GM session; sensitive output is redacted; dangerous script and lifecycle actions require explicit `dangerous=true`.
-- **Live D35E campaign orientation**: the bridge has been developed against a real Foundry 14.361 / D35E 3.0.2 environment, with validation isolated to `scratch` and explicit protection against accidental `return-to-undermountain` mutation.
+- **Preview/apply transactions**: `plan_journal_changes`, `plan_scene_changes`, `plan_document_changes`, and `plan_chat_messages` return caller-held `BridgePlan` previews with `planId`, `planHash`, `worldId`, expiration, compact before/after summaries, warnings, and explicit `apply_bridge_plan` confirmation.
+- **Backup-first mutation posture**: destructive document operations create local backups, and transaction updates report backup metadata before mutation.
+- **Self-diagnostics**: `bridge_self_check`, `list_bridge_tools`, registry checksums, capability manifests, direct MCP exposure flags, fallback-callable flags, and runtime summaries make drift and broken readiness visible.
+- **MCP parity fallback**: `call_bridge_tool` keeps registry tools reachable when direct MCP discovery lags, while preserving each target tool's normal gates.
+- **Local lifecycle restart**: `restart_foundry_world` can stop Foundry, relaunch the visible app, launch an explicit world, join as GM, restore a managed bridge GM client, and verify readiness with Windows Credential Manager-backed secrets.
+- **Trusted-world model**: the daemon is localhost-only and token-gated; live-world tools require a trusted GM session; sensitive output is redacted; dangerous script and lifecycle actions require explicit `dangerous=true`.
+- **Real-system validation**: development has been grounded in a live Foundry 14 / D35E validation environment, with disposable-world validation separated from private campaign work.
 
-## Current Weaknesses Versus Peers
+## Current Gaps
 
-- We are behind on broad, polished gameplay operations such as dice rolling, actor roll helpers, initiative/combat orchestration, roll tables, active effects, walls, tiles, sounds, scene activation, and map/image generation.
-- Our install and public-user onboarding are still local-development shaped, even with the credential wizard and lifecycle config scripts.
-- The lifecycle restart path is valuable but Windows-specific in this slice.
+These are useful product signals, not criticisms of the architecture.
+
+- Broader gameplay operations such as dice rolling, actor roll helpers, combat orchestration, roll tables, active effects, walls, tiles, sounds, scene activation, and map/image generation remain future work.
+- Public onboarding still needs packaging polish beyond the current local development scripts.
+- Lifecycle restart is currently Windows-oriented.
 - Several tools still expose broad JSON payloads and free-form outputs rather than tight schemas and public compatibility contracts.
-- We do not yet have a rollback browser, transaction history viewer, persistent session timeline, packaged installer, marketplace-ready docs, or a polished GM workflow UI.
-- We are currently strongest for a power user or developer-GM, not yet for a casual Foundry user.
+- The project does not yet include a rollback browser, transaction history viewer, persistent session timeline, packaged installer, marketplace-ready docs, or polished GM workflow UI.
 
-## Monetization Verdict
+## Monetization View
 
-This is monetizable, but the product should not be framed as "another Foundry MCP."
-
-The strongest paid product is:
+The most compelling paid-product framing is not "another Foundry MCP." It is:
 
 > A local-first AI GM operations assistant for Foundry that safely inspects, prepares, modifies, restarts, validates, and recovers real campaign worlds.
 
-Likely paying audiences:
+Likely interested audiences:
 
 - professional GMs and paid tables with high-value campaign worlds
 - power GMs running large, long-lived worlds
-- Foundry module/system maintainers who need diagnostics and repeatable live validation
+- Foundry module and system maintainers who need diagnostics and repeatable live validation
 - DMs converting adventures, compendiums, or prep notes into Foundry-ready content
-- privacy-sensitive users who do not want campaign secrets or credentials routed through hosted services
+- privacy-sensitive users who prefer local campaign operations over hosted world access
 
-The best monetization path is probably an **open core plus paid convenience/workflow layer**:
+A practical monetization path is open core plus paid convenience/workflow layers:
 
-- free/open local bridge and core safety model
-- paid Windows installer and guided setup
+- free/open local bridge and safety model
+- paid installer and guided setup
 - paid support and managed updates
 - paid workflow packs such as session prep, scene readiness, compendium import, rollback browser, macro install/update, encounter setup, and session secretary
-- system-specific premium packs, starting with D35E because that is where our local expertise and validation environment are strongest
+- system-specific premium packs, starting with D35E because that is the first deeply validated environment
 
-Avoid leading with a hosted bridge unless the security model is redesigned deliberately. Hosted access is a plausible business model, and one peer already demonstrates it, but our clearest trust advantage is local-first operation.
+Hosted access could be a separate future product, but the clearest trust advantage today is local-first operation.
 
-## v1.0 Product Direction
+## Product Direction
 
-Do not chase every raw Foundry API operation just because peers expose it. Use peers as evidence that basic "AI controls Foundry" is already becoming commodity infrastructure.
+For v1.0, avoid chasing raw operation parity as the main goal. Focus on the work that reinforces the distinct lane:
 
-For v1.0, prioritize the work that reinforces the distinct lane:
-
-1. Finish preview/apply coverage for the most common GM workflows: walls, scene activation, actor/item patching, embedded item helpers, compendium-to-world imports, and macro install/update.
+1. Finish preview/apply coverage for common GM workflows: walls, scene activation, actor/item patching, embedded item helpers, compendium-to-world imports, and macro install/update.
 2. Add rollback browsing and assisted restore from backup metadata.
-3. Add persistent session timeline and a session-secretary workflow that can summarize what happened without relying on raw chat/log dumps.
-4. Tighten schemas and output contracts for every transaction and high-value read tool.
-5. Package setup for real users: installer, credential wizard polish, compatibility matrix, first-run self-check, and one-click `scratch` validation.
+3. Add persistent session timeline and a session-secretary workflow that summarizes play without relying on raw chat/log dumps.
+4. Tighten schemas and output contracts for transaction and high-value read tools.
+5. Package setup for real users: installer, credential wizard polish, compatibility matrix, first-run self-check, and one-click disposable-world validation.
 6. Produce a public demo that shows the bridge preventing a bad edit, previewing a good edit, applying it with confirmation, and verifying the resulting Foundry state.
 
-The commercial message should stay practical:
-
-- safer than raw scripting
-- more operational than a chat-only assistant
-- more private than hosted world access
-- more recoverable than direct mutation tools
-- designed for real campaign worlds, not disposable demos
-
+The commercial message should stay practical: safer than raw scripting, more operational than a chat-only assistant, more private than hosted world access, more recoverable than direct mutation tools, and designed for real campaign worlds.

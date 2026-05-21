@@ -1,9 +1,26 @@
 {
   "name": "foundry-codex-bridge",
   "version": "0.2.12",
-  "private": true,
   "type": "module",
-  "description": "Local Codex MCP bridge for a FoundryVTT GM session.",
+  "description": "Local-first Codex MCP bridge for safely operating trusted Foundry VTT GM sessions.",
+  "license": "MIT",
+  "author": "Spencer Poole",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SpencerZPoole/codex-foundry-bridge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/SpencerZPoole/codex-foundry-bridge/issues"
+  },
+  "homepage": "https://github.com/SpencerZPoole/codex-foundry-bridge#readme",
+  "keywords": [
+    "foundryvtt",
+    "mcp",
+    "codex",
+    "gamemaster-tools",
+    "ai-tools",
+    "foundry-vtt"
+  ],
   "main": "src/server.js",
   "scripts": {
     "start": "node src/mcp.js",

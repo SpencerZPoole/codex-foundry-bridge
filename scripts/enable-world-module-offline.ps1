@@ -1,5 +1,7 @@
 param(
-  [string]$WorldId = "return-to-undermountain"
+  [Parameter(Mandatory = $true)]
+  [ValidateNotNullOrEmpty()]
+  [string]$WorldId
 )
 
 $ErrorActionPreference = "Stop"
