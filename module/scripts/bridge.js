@@ -1,5 +1,5 @@
 const MODULE_ID = "codex-foundry-bridge";
-const MODULE_VERSION = "0.2.9";
+const MODULE_VERSION = "0.2.10";
 const DEFAULT_URL = "ws://127.0.0.1:30123/foundry";
 const RECONNECT_MS = 5000;
 const MAX_RESULT_CHARS = 1_000_000;
@@ -1093,6 +1093,404 @@ function journalEntryPreview(entryOrData) {
   });
 }
 
+const SUPPORTED_PLAN_SOURCES = new Set(["plan_journal_changes", "plan_scene_changes"]);
+const SCENE_CHANGE_ACTIONS = new Set([
+  "create_token",
+  "update_token",
+  "create_light",
+  "update_light",
+  "create_note",
+  "update_note"
+]);
+const SCENE_CHANGE_META_FIELDS = new Set([
+  "action",
+  "sceneId",
+  "sceneName",
+  "tokenId",
+  "tokenName",
+  "actorId",
+  "actorName",
+  "lightId",
+  "lightName",
+  "noteId",
+  "noteName",
+  "journalId",
+  "journalName",
+  "entryId",
+  "pageId",
+  "pageName",
+  "data"
+]);
+const TOKEN_PLAN_FIELDS = new Set([
+  "name",
+  "x",
+  "y",
+  "elevation",
+  "hidden",
+  "disposition",
+  "rotation",
+  "width",
+  "height",
+  "texture",
+  "img",
+  "light",
+  "sight",
+  "detectionModes",
+  "actorLink",
+  "bar1",
+  "bar2",
+  "displayName",
+  "displayBars",
+  "alpha",
+  "lockRotation"
+]);
+const LIGHT_PLAN_FIELDS = new Set([
+  "x",
+  "y",
+  "hidden",
+  "rotation",
+  "walls",
+  "vision",
+  "config"
+]);
+const NOTE_PLAN_FIELDS = new Set([
+  "x",
+  "y",
+  "icon",
+  "iconSize",
+  "text",
+  "textAnchor",
+  "global",
+  "entryId",
+  "pageId"
+]);
+
+function plainClone(value) {
+  if (value == null || typeof value !== "object") return value;
+  return foundry.utils.deepClone(value);
+}
+
+function plainObject(value) {
+  if (!value) return {};
+  if (value.toObject) return value.toObject();
+  return plainClone(value);
+}
+
+function mergePreviewData(base, data) {
+  return foundry.utils.mergeObject(plainObject(base), plainClone(data ?? {}), {
+    inplace: false,
+    recursive: true
+  });
+}
+
+function sceneEntriesByName(name) {
+  const normalized = String(name ?? "").trim().toLowerCase();
+  if (!normalized) return [];
+  return Array.from(game.scenes.values()).filter((scene) => scene.name?.toLowerCase() === normalized);
+}
+
+function actorsByName(name) {
+  const normalized = String(name ?? "").trim().toLowerCase();
+  if (!normalized) return [];
+  return Array.from(game.actors.values()).filter((actor) => actor.name?.toLowerCase() === normalized);
+}
+
+function resolveSceneForPlan(args = {}, change = {}) {
+  const sceneId = change.sceneId ?? args.sceneId;
+  const sceneName = change.sceneName ?? args.sceneName;
+  if (sceneId) {
+    const scene = game.scenes.get(sceneId);
+    if (!scene) throw new Error(`Scene not found: ${sceneId}`);
+    return scene;
+  }
+  if (sceneName) {
+    const matches = sceneEntriesByName(sceneName);
+    if (matches.length > 1) throw new Error(`Scene name is ambiguous: ${sceneName}`);
+    if (!matches.length) throw new Error(`Scene not found: ${sceneName}`);
+    return matches[0];
+  }
+  const scene = canvas?.scene ?? game.scenes?.active ?? null;
+  if (!scene) throw new Error("No active scene; provide sceneId or sceneName.");
+  return scene;
+}
+
+function resolveActorForSceneChange(change = {}, data = {}) {
+  const actorId = change.actorId ?? data.actorId;
+  if (actorId) {
+    const actor = game.actors.get(actorId);
+    if (!actor) throw new Error(`Actor not found: ${actorId}`);
+    return actor;
+  }
+  if (change.actorName) {
+    const matches = actorsByName(change.actorName);
+    if (matches.length > 1) throw new Error(`Actor name is ambiguous: ${change.actorName}`);
+    if (!matches.length) throw new Error(`Actor not found: ${change.actorName}`);
+    return matches[0];
+  }
+  return null;
+}
+
+function resolveSceneEmbeddedForPlan(scene, key, id, name, label) {
+  const documents = sceneDocumentArray(scene, key);
+  if (id) {
+    const document = scene[key]?.get?.(id) ?? documents.find((entry) => entry.id === id || entry._id === id);
+    if (!document) throw new Error(`${label} not found in scene ${scene.name}: ${id}`);
+    return document;
+  }
+  if (name) {
+    const normalized = String(name).trim().toLowerCase();
+    const matches = documents.filter((entry) => entry.name?.toLowerCase() === normalized || entry.text?.toLowerCase?.() === normalized);
+    if (matches.length > 1) throw new Error(`${label} name is ambiguous in scene ${scene.name}: ${name}`);
+    if (!matches.length) throw new Error(`${label} not found in scene ${scene.name}: ${name}`);
+    return matches[0];
+  }
+  throw new Error(`${label} id or name is required.`);
+}
+
+function sceneChangeData(change = {}, allowedFields, label) {
+  if (!change || typeof change !== "object" || Array.isArray(change)) throw new Error(`${label} change must be an object.`);
+  const rawData = change.data ?? {};
+  if (!rawData || typeof rawData !== "object" || Array.isArray(rawData)) throw new Error(`${label} data must be an object.`);
+  const data = plainClone(rawData);
+  const unknownDataFields = Object.keys(data).filter((key) => !allowedFields.has(key));
+  const unknownTopLevelFields = Object.keys(change).filter((key) => !SCENE_CHANGE_META_FIELDS.has(key) && !allowedFields.has(key));
+  const unknownFields = [...unknownTopLevelFields, ...unknownDataFields.map((key) => `data.${key}`)];
+  if (unknownFields.length) throw new Error(`${label} has unsupported field(s): ${unknownFields.join(", ")}`);
+  for (const key of allowedFields) {
+    if (Object.prototype.hasOwnProperty.call(change, key)) data[key] = plainClone(change[key]);
+  }
+  return data;
+}
+
+function normalizeTokenPlanData(data, warnings, opId) {
+  if (data.img != null) {
+    const texture = data.texture && typeof data.texture === "object" && !Array.isArray(data.texture)
+      ? plainClone(data.texture)
+      : {};
+    if (texture.src == null) texture.src = data.img;
+    data.texture = texture;
+    delete data.img;
+    warnings.push(`${opId}: normalized token img to texture.src.`);
+  }
+  return data;
+}
+
+async function actorPrototypeTokenData(actor) {
+  let data = {};
+  if (actor?.getTokenDocument) {
+    const tokenDocument = await actor.getTokenDocument({});
+    data = plainObject(tokenDocument);
+  } else if (actor?.prototypeToken) {
+    data = plainObject(actor.prototypeToken);
+  }
+  delete data._id;
+  data.actorId = actor.id;
+  if (!data.name) data.name = actor.name;
+  return data;
+}
+
+function tokenPlanPreview(tokenOrData) {
+  const source = plainObject(tokenOrData);
+  const actorId = source.actorId ?? tokenOrData?.actorId ?? null;
+  const actor = tokenOrData?.actor ?? (actorId ? game.actors.get(actorId) : null);
+  return redact({
+    id: source._id ?? tokenOrData?.id ?? null,
+    name: source.name ?? tokenOrData?.name ?? null,
+    actorId,
+    actorName: actor?.name ?? null,
+    x: source.x ?? tokenOrData?.x ?? null,
+    y: source.y ?? tokenOrData?.y ?? null,
+    elevation: source.elevation ?? tokenOrData?.elevation ?? null,
+    hidden: source.hidden ?? tokenOrData?.hidden ?? false,
+    disposition: source.disposition ?? tokenOrData?.disposition ?? null,
+    rotation: source.rotation ?? tokenOrData?.rotation ?? null,
+    width: source.width ?? tokenOrData?.width ?? null,
+    height: source.height ?? tokenOrData?.height ?? null,
+    img: source.texture?.src ?? source.img ?? tokenOrData?.texture?.src ?? tokenOrData?.img ?? null
+  });
+}
+
+function lightPlanPreview(lightOrData) {
+  const source = plainObject(lightOrData);
+  return redact({
+    id: source._id ?? lightOrData?.id ?? null,
+    x: source.x ?? lightOrData?.x ?? null,
+    y: source.y ?? lightOrData?.y ?? null,
+    hidden: source.hidden ?? lightOrData?.hidden ?? false,
+    rotation: source.rotation ?? lightOrData?.rotation ?? null,
+    walls: source.walls ?? lightOrData?.walls ?? null,
+    vision: source.vision ?? lightOrData?.vision ?? null,
+    config: source.config ?? lightOrData?.config ?? null
+  });
+}
+
+function notePlanPreview(noteOrData) {
+  const source = plainObject(noteOrData);
+  const entryId = source.entryId ?? noteOrData?.entryId ?? null;
+  const pageId = source.pageId ?? noteOrData?.pageId ?? null;
+  const entry = noteOrData?.entry ?? (entryId ? game.journal.get(entryId) : null);
+  const page = entry?.pages?.get?.(pageId) ?? null;
+  return redact({
+    id: source._id ?? noteOrData?.id ?? null,
+    x: source.x ?? noteOrData?.x ?? null,
+    y: source.y ?? noteOrData?.y ?? null,
+    entryId,
+    entryName: entry?.name ?? null,
+    pageId,
+    pageName: page?.name ?? null,
+    icon: source.icon ?? noteOrData?.icon ?? null,
+    text: source.text ?? noteOrData?.text ?? null,
+    textAnchor: source.textAnchor ?? noteOrData?.textAnchor ?? null
+  });
+}
+
+function resolveJournalEntryForNote(change = {}, existingNote = null, required = false) {
+  const journalId = change.journalId ?? change.entryId ?? change.data?.entryId;
+  if (journalId || change.journalName) return resolveJournalEntryForPlan({ journalId, journalName: change.journalName });
+  const existingEntryId = existingNote?.entryId ?? existingNote?.entry?.id ?? null;
+  if (existingEntryId) {
+    const entry = game.journal.get(existingEntryId);
+    if (entry) return entry;
+  }
+  if (required) throw new Error("create_note requires journalId or journalName.");
+  return null;
+}
+
+function resolveJournalPageForNote(entry, change = {}) {
+  if (!entry) return null;
+  const pageId = change.pageId ?? change.data?.pageId;
+  if (pageId || change.pageName) return resolveJournalPageForPlan(entry, { pageId, pageName: change.pageName });
+  return null;
+}
+
+function sceneTarget(scene, documentName) {
+  return {
+    documentName,
+    sceneId: scene.id,
+    sceneName: scene.name
+  };
+}
+
+async function scenePlanOperation(args, change, index, warnings) {
+  const opId = `op${index + 1}`;
+  const action = String(change?.action ?? "").trim();
+  if (!SCENE_CHANGE_ACTIONS.has(action)) throw new Error(`Unsupported scene plan action: ${action || "(empty)"}`);
+  const scene = resolveSceneForPlan(args, change);
+
+  if (action === "create_token") {
+    let data = normalizeTokenPlanData(sceneChangeData(change, TOKEN_PLAN_FIELDS, action), warnings, opId);
+    const actor = resolveActorForSceneChange(change, data);
+    if (actor) {
+      data = foundry.utils.mergeObject(await actorPrototypeTokenData(actor), data, {
+        inplace: false,
+        recursive: true
+      });
+      data.actorId = actor.id;
+    }
+    if (!data.name) throw new Error("create_token requires actorId, actorName, or name.");
+    if (data.x == null) data.x = 0;
+    if (data.y == null) data.y = 0;
+    delete data._id;
+    const target = {
+      ...sceneTarget(scene, "Token"),
+      actorId: data.actorId ?? null,
+      actorName: actor?.name ?? null,
+      tokenName: data.name
+    };
+    return makePlanOperation(opId, "scene.create_token", target, data, {
+      before: null,
+      after: tokenPlanPreview(data)
+    }, false);
+  }
+
+  if (action === "update_token") {
+    const token = resolveSceneEmbeddedForPlan(scene, "tokens", change.tokenId, change.tokenName, "Token");
+    const data = normalizeTokenPlanData(sceneChangeData(change, TOKEN_PLAN_FIELDS, action), warnings, opId);
+    const actor = resolveActorForSceneChange(change, data);
+    if (actor) data.actorId = actor.id;
+    assertPlanHasChanges(data, "update_token requires at least one supported token field or actor reference.");
+    data._id = token.id;
+    const target = {
+      ...sceneTarget(scene, "Token"),
+      tokenId: token.id,
+      tokenName: token.name,
+      actorId: data.actorId ?? token.actorId ?? null,
+      actorName: actor?.name ?? token.actor?.name ?? null
+    };
+    return makePlanOperation(opId, "scene.update_token", target, data, {
+      before: tokenPlanPreview(token),
+      after: tokenPlanPreview(mergePreviewData(token, data))
+    }, true);
+  }
+
+  if (action === "create_light") {
+    const data = sceneChangeData(change, LIGHT_PLAN_FIELDS, action);
+    assertPlanHasChanges(data, "create_light requires at least one supported light field.");
+    if (data.x == null) data.x = 0;
+    if (data.y == null) data.y = 0;
+    delete data._id;
+    return makePlanOperation(opId, "scene.create_light", sceneTarget(scene, "AmbientLight"), data, {
+      before: null,
+      after: lightPlanPreview(data)
+    }, false);
+  }
+
+  if (action === "update_light") {
+    const light = resolveSceneEmbeddedForPlan(scene, "lights", change.lightId, change.lightName, "AmbientLight");
+    const data = sceneChangeData(change, LIGHT_PLAN_FIELDS, action);
+    assertPlanHasChanges(data, "update_light requires at least one supported light field.");
+    data._id = light.id;
+    return makePlanOperation(opId, "scene.update_light", {
+      ...sceneTarget(scene, "AmbientLight"),
+      lightId: light.id
+    }, data, {
+      before: lightPlanPreview(light),
+      after: lightPlanPreview(mergePreviewData(light, data))
+    }, true);
+  }
+
+  if (action === "create_note") {
+    const data = sceneChangeData(change, NOTE_PLAN_FIELDS, action);
+    const entry = resolveJournalEntryForNote(change, null, true);
+    const page = resolveJournalPageForNote(entry, change);
+    data.entryId = entry.id;
+    if (page) data.pageId = page.id;
+    if (data.x == null) data.x = 0;
+    if (data.y == null) data.y = 0;
+    delete data._id;
+    return makePlanOperation(opId, "scene.create_note", {
+      ...sceneTarget(scene, "Note"),
+      journalId: entry.id,
+      journalName: entry.name,
+      pageId: page?.id ?? null,
+      pageName: page?.name ?? null
+    }, data, {
+      before: null,
+      after: notePlanPreview(data)
+    }, false);
+  }
+
+  const note = resolveSceneEmbeddedForPlan(scene, "notes", change.noteId, change.noteName, "Note");
+  const data = sceneChangeData(change, NOTE_PLAN_FIELDS, action);
+  const entry = resolveJournalEntryForNote(change, note, false);
+  const page = resolveJournalPageForNote(entry, change);
+  if (change.journalId || change.journalName || change.entryId || change.data?.entryId) data.entryId = entry.id;
+  if (page) data.pageId = page.id;
+  assertPlanHasChanges(data, "update_note requires at least one supported note field or journal/page target.");
+  data._id = note.id;
+  return makePlanOperation(opId, "scene.update_note", {
+    ...sceneTarget(scene, "Note"),
+    noteId: note.id,
+    journalId: data.entryId ?? note.entryId ?? null,
+    journalName: entry?.name ?? note.entry?.name ?? null,
+    pageId: data.pageId ?? note.pageId ?? null,
+    pageName: page?.name ?? null
+  }, data, {
+    before: notePlanPreview(note),
+    after: notePlanPreview(mergePreviewData(note, data))
+  }, true);
+}
+
 function operationPreview(operation) {
   return {
     before: operation.before ?? null,
@@ -1276,10 +1674,50 @@ async function planJournalChanges(args = {}) {
   });
 }
 
+async function planSceneChanges(args = {}) {
+  const changes = Array.isArray(args.changes) ? args.changes : [];
+  if (!changes.length) throw new Error("plan_scene_changes requires at least one change.");
+
+  const createdAt = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + BRIDGE_PLAN_TTL_MS).toISOString();
+  const warnings = [];
+  const operations = [];
+  for (let index = 0; index < changes.length; index += 1) {
+    operations.push(await scenePlanOperation(args, changes[index], index, warnings));
+  }
+
+  const scenesById = new Map();
+  for (const operation of operations) {
+    scenesById.set(operation.target.sceneId, {
+      sceneId: operation.target.sceneId,
+      sceneName: operation.target.sceneName
+    });
+  }
+
+  const requiresBackup = operations.some((operation) => operation.backupRequired === true);
+  return finalizeBridgePlan({
+    kind: "bridge-plan",
+    source: "plan_scene_changes",
+    version: 1,
+    planId: null,
+    worldId: game.world.id,
+    createdAt,
+    expiresAt,
+    action: "scene_changes",
+    summary: `scene_changes (${operations.length} scene operation${operations.length === 1 ? "" : "s"})`,
+    requiresBackup,
+    operations,
+    warnings,
+    targets: {
+      scenes: Array.from(scenesById.values())
+    }
+  });
+}
+
 function assertBridgePlanConfirmation(plan, confirmation = {}) {
   if (!plan || typeof plan !== "object") throw new Error("apply_bridge_plan requires plan.");
-  if (plan.kind !== "bridge-plan" || plan.source !== "plan_journal_changes") {
-    throw new Error("apply_bridge_plan only accepts plans produced by plan_journal_changes.");
+  if (plan.kind !== "bridge-plan" || !SUPPORTED_PLAN_SOURCES.has(plan.source) || plan.version !== 1) {
+    throw new Error("apply_bridge_plan only accepts version 1 plans produced by plan_journal_changes or plan_scene_changes.");
   }
   if (!Array.isArray(plan.operations) || !plan.operations.length) {
     throw new Error("apply_bridge_plan requires at least one operation.");
@@ -1293,6 +1731,44 @@ function assertBridgePlanConfirmation(plan, confirmation = {}) {
   if (!Number.isFinite(Date.parse(plan.expiresAt)) || Date.parse(plan.expiresAt) < Date.now()) {
     throw new Error("apply_bridge_plan plan has expired.");
   }
+}
+
+function sceneForPlanOperation(operation) {
+  const scene = game.scenes.get(operation.target?.sceneId);
+  if (!scene) throw new Error(`Scene not found: ${operation.target?.sceneId}`);
+  return scene;
+}
+
+function sceneOperationConfig(type) {
+  if (type.endsWith("_token")) return { embeddedName: "Token", idKey: "tokenId", preview: tokenPlanPreview };
+  if (type.endsWith("_light")) return { embeddedName: "AmbientLight", idKey: "lightId", preview: lightPlanPreview };
+  if (type.endsWith("_note")) return { embeddedName: "Note", idKey: "noteId", preview: notePlanPreview };
+  throw new Error(`Unsupported bridge plan operation: ${type}`);
+}
+
+async function applyScenePlanOperation(operation) {
+  const scene = sceneForPlanOperation(operation);
+  const config = sceneOperationConfig(operation.type);
+  if (operation.type.includes(".create_")) {
+    const created = await scene.createEmbeddedDocuments(config.embeddedName, [operation.data ?? {}]);
+    return {
+      opId: operation.opId,
+      type: operation.type,
+      ok: true,
+      documents: created.map(config.preview)
+    };
+  }
+
+  const embeddedId = operation.target?.[config.idKey] ?? operation.data?._id;
+  if (!embeddedId) throw new Error(`${config.embeddedName} id is required for ${operation.type}.`);
+  const data = { ...(operation.data ?? {}), _id: embeddedId };
+  const updated = await scene.updateEmbeddedDocuments(config.embeddedName, [data]);
+  return {
+    opId: operation.opId,
+    type: operation.type,
+    ok: true,
+    documents: updated.map(config.preview)
+  };
 }
 
 async function applyBridgePlan(args = {}) {
@@ -1323,6 +1799,8 @@ async function applyBridgePlan(args = {}) {
       if (!page) throw new Error(`JournalEntryPage not found: ${operation.target?.pageId}`);
       const updated = await page.update(operation.data ?? {});
       results.push({ opId: operation.opId, type: operation.type, ok: true, document: journalPagePreview(updated) });
+    } else if (operation.type.startsWith("scene.")) {
+      results.push(await applyScenePlanOperation(operation));
     } else {
       throw new Error(`Unsupported bridge plan operation: ${operation.type}`);
     }
@@ -1549,6 +2027,9 @@ async function handleBridgeRequest(method, args = {}) {
 
     case "plan_journal_changes":
       return planJournalChanges(args);
+
+    case "plan_scene_changes":
+      return planSceneChanges(args);
 
     case "apply_bridge_plan":
       return applyBridgePlan(args);

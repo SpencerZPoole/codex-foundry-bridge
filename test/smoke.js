@@ -29,6 +29,7 @@ const highLevelReadTools = [
 ];
 const transactionTools = [
   "plan_journal_changes",
+  "plan_scene_changes",
   "apply_bridge_plan"
 ];
 
@@ -122,9 +123,50 @@ function signBridgePlan(plan) {
   return signed;
 }
 
+function defaultPlanTarget(operationType) {
+  if (operationType === "journal.create_entry") {
+    return { documentName: "JournalEntry", name: "Smoke Test Journal" };
+  }
+  if (operationType.startsWith("journal.")) {
+    return { documentName: "JournalEntry", journalId: "journal-1", journalName: "Smoke Test Journal" };
+  }
+  if (operationType === "scene.create_token") {
+    return { documentName: "Token", sceneId: "scene-1", sceneName: "Smoke Scene" };
+  }
+  if (operationType === "scene.update_token") {
+    return { documentName: "Token", sceneId: "scene-1", sceneName: "Smoke Scene", tokenId: "token-1" };
+  }
+  if (operationType === "scene.create_light") {
+    return { documentName: "AmbientLight", sceneId: "scene-1", sceneName: "Smoke Scene" };
+  }
+  if (operationType === "scene.update_light") {
+    return { documentName: "AmbientLight", sceneId: "scene-1", sceneName: "Smoke Scene", lightId: "light-1" };
+  }
+  if (operationType === "scene.create_note") {
+    return { documentName: "Note", sceneId: "scene-1", sceneName: "Smoke Scene", journalId: "journal-1" };
+  }
+  if (operationType === "scene.update_note") {
+    return { documentName: "Note", sceneId: "scene-1", sceneName: "Smoke Scene", noteId: "note-1", journalId: "journal-1" };
+  }
+  return { documentName: "Unknown" };
+}
+
+function defaultPlanData(operationType) {
+  if (operationType === "journal.create_entry") return { name: "Smoke Test Journal", pages: [] };
+  if (operationType.startsWith("journal.")) return { name: "Smoke Test Journal Updated" };
+  if (operationType === "scene.create_token") return { name: "Smoke Token", x: 100, y: 100, hidden: true };
+  if (operationType === "scene.update_token") return { _id: "token-1", x: 120, y: 140, hidden: false };
+  if (operationType === "scene.create_light") return { x: 100, y: 100, hidden: true, config: { dim: 10, bright: 5 } };
+  if (operationType === "scene.update_light") return { _id: "light-1", x: 150, y: 150, hidden: false };
+  if (operationType === "scene.create_note") return { x: 100, y: 100, entryId: "journal-1", text: "Smoke note" };
+  if (operationType === "scene.update_note") return { _id: "note-1", x: 160, y: 160, text: "Updated smoke note" };
+  return {};
+}
+
 function makeBridgePlan({
   worldId = dynamicWorldId,
   operationType = "journal.create_entry",
+  source = operationType.startsWith("scene.") ? "plan_scene_changes" : "plan_journal_changes",
   backupRequired = false,
   expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString(),
   operation = null
@@ -132,17 +174,13 @@ function makeBridgePlan({
   const op = operation ?? {
     opId: "op1",
     type: operationType,
-    target: operationType === "journal.create_entry"
-      ? { documentName: "JournalEntry", name: "Smoke Test Journal" }
-      : { documentName: "JournalEntry", journalId: "journal-1", journalName: "Smoke Test Journal" },
-    data: operationType === "journal.create_entry"
-      ? { name: "Smoke Test Journal", pages: [] }
-      : { name: "Smoke Test Journal Updated" },
+    target: defaultPlanTarget(operationType),
+    data: defaultPlanData(operationType),
     backupRequired
   };
   return signBridgePlan({
     kind: "bridge-plan",
-    source: "plan_journal_changes",
+    source,
     version: 1,
     planId: `smoke-${operationType}-${backupRequired ? "backup" : "create"}`,
     worldId,
@@ -238,6 +276,11 @@ try {
   assert.equal(planTool.readOnly, true);
   assert.equal(planTool.requiresTrustedSession, true);
   assert.equal(planTool.fallbackCallable, true);
+  const scenePlanTool = toolsCall.body.result.tools.find((entry) => entry.name === "plan_scene_changes");
+  assert.equal(scenePlanTool.category, "transaction");
+  assert.equal(scenePlanTool.readOnly, true);
+  assert.equal(scenePlanTool.requiresTrustedSession, true);
+  assert.equal(scenePlanTool.fallbackCallable, true);
   const applyTool = toolsCall.body.result.tools.find((entry) => entry.name === "apply_bridge_plan");
   assert.equal(applyTool.category, "transaction");
   assert.equal(applyTool.readOnly, false);
@@ -382,6 +425,12 @@ try {
   assert.equal(refusedPlanJournal.response.status, 500);
   assert.match(refusedPlanJournal.body.error, /trusted GM Foundry bridge session/);
 
+  const refusedPlanScene = await callBridge("plan_scene_changes", {
+    changes: [{ action: "create_token", data: { name: "Smoke Token", x: 100, y: 100 } }]
+  }, { expectOk: false });
+  assert.equal(refusedPlanScene.response.status, 500);
+  assert.match(refusedPlanScene.body.error, /trusted GM Foundry bridge session/);
+
   const preTrustPlan = makeBridgePlan();
   const refusedApplyPlan = await callBridge("apply_bridge_plan", {
     plan: preTrustPlan,
@@ -484,6 +533,18 @@ try {
   });
   assert.equal(plannedJournal.body.result.method, "plan_journal_changes");
 
+  const plannedScene = await callBridge("plan_scene_changes", {
+    changes: [{ action: "create_token", data: { name: "Smoke Token", x: 100, y: 100 } }]
+  });
+  assert.equal(plannedScene.body.result.method, "plan_scene_changes");
+  const plannedSceneViaFallback = await callBridge("call_bridge_tool", {
+    method: "plan_scene_changes",
+    args: {
+      changes: [{ action: "create_light", data: { x: 100, y: 100, config: { dim: 10 } } }]
+    }
+  });
+  assert.equal(plannedSceneViaFallback.body.result.method, "plan_scene_changes");
+
   const createPlan = makeBridgePlan();
   const missingConfirmation = await callBridge("apply_bridge_plan", {
     plan: createPlan
@@ -531,6 +592,48 @@ try {
   assert.equal(malformed.response.status, 500);
   assert.match(malformed.body.error, /Unsupported bridge plan operation/);
 
+  const unsupportedScenePlan = makeBridgePlan({
+    source: "plan_scene_changes",
+    operation: {
+      opId: "op1",
+      type: "scene.create_wall",
+      target: { documentName: "Wall", sceneId: "scene-1", sceneName: "Smoke Scene" },
+      data: { c: [0, 0, 100, 100] },
+      backupRequired: false
+    }
+  });
+  const unsupportedScene = await callBridge("apply_bridge_plan", {
+    plan: unsupportedScenePlan,
+    confirmation: confirmationForPlan(unsupportedScenePlan)
+  }, { expectOk: false });
+  assert.equal(unsupportedScene.response.status, 500);
+  assert.match(unsupportedScene.body.error, /Unsupported bridge plan operation/);
+
+  const missingSceneTargetPlan = makeBridgePlan({
+    operationType: "scene.update_token",
+    operation: {
+      opId: "op1",
+      type: "scene.update_token",
+      target: { documentName: "Token", sceneId: "scene-1", sceneName: "Smoke Scene" },
+      data: { x: 120 },
+      backupRequired: true
+    }
+  });
+  const missingSceneTarget = await callBridge("apply_bridge_plan", {
+    plan: missingSceneTargetPlan,
+    confirmation: confirmationForPlan(missingSceneTargetPlan)
+  }, { expectOk: false });
+  assert.equal(missingSceneTarget.response.status, 500);
+  assert.match(missingSceneTarget.body.error, /tokenId/);
+
+  const unknownSourcePlan = makeBridgePlan({ source: "plan_unknown_changes" });
+  const unknownSource = await callBridge("apply_bridge_plan", {
+    plan: unknownSourcePlan,
+    confirmation: confirmationForPlan(unknownSourcePlan)
+  }, { expectOk: false });
+  assert.equal(unknownSource.response.status, 500);
+  assert.match(unknownSource.body.error, /plan_journal_changes or plan_scene_changes/);
+
   const appliedViaFallback = await callBridge("call_bridge_tool", {
     method: "apply_bridge_plan",
     args: {
@@ -557,6 +660,33 @@ try {
   assert.ok(appliedUpdate.body.result.backup.backupPath.includes(`${path.sep}backups${path.sep}`));
   assert.equal(appliedUpdate.body.result.result.method, "apply_bridge_plan");
   assert.equal(JSON.stringify(appliedUpdate.body.result).includes(token), false);
+
+  const sceneCreatePlan = makeBridgePlan({ operationType: "scene.create_token" });
+  const appliedSceneCreate = await callBridge("call_bridge_tool", {
+    method: "apply_bridge_plan",
+    args: {
+      plan: sceneCreatePlan,
+      confirmation: confirmationForPlan(sceneCreatePlan)
+    }
+  });
+  assert.equal(appliedSceneCreate.body.result.applied, true);
+  assert.equal(appliedSceneCreate.body.result.backupRequired, false);
+  assert.equal(appliedSceneCreate.body.result.backup, null);
+  assert.equal(appliedSceneCreate.body.result.result.method, "apply_bridge_plan");
+
+  const sceneUpdatePlan = makeBridgePlan({
+    operationType: "scene.update_light",
+    backupRequired: true
+  });
+  const appliedSceneUpdate = await callBridge("apply_bridge_plan", {
+    plan: sceneUpdatePlan,
+    confirmation: confirmationForPlan(sceneUpdatePlan)
+  });
+  assert.equal(appliedSceneUpdate.body.result.applied, true);
+  assert.equal(appliedSceneUpdate.body.result.backupRequired, true);
+  assert.equal(appliedSceneUpdate.body.result.backup.ok, true);
+  assert.equal(appliedSceneUpdate.body.result.result.method, "apply_bridge_plan");
+  assert.equal(JSON.stringify(appliedSceneUpdate.body.result).includes(token), false);
 
   const revoked = await callBridge("revoke_trusted_world", { worldId: dynamicWorldId });
   assert.deepEqual(revoked.body.result, { revoked: true, worldId: dynamicWorldId });

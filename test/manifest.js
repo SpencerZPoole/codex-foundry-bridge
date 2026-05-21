@@ -27,6 +27,7 @@ const highLevelReadTools = [
 ];
 const transactionTools = [
   "plan_journal_changes",
+  "plan_scene_changes",
   "apply_bridge_plan"
 ];
 
@@ -92,6 +93,11 @@ for (const name of transactionTools) {
 const journalPlanTool = manifest.tools.find((entry) => entry.name === "plan_journal_changes");
 assert.equal(journalPlanTool.risk, "read");
 assert.equal(journalPlanTool.readOnly, true);
+
+const scenePlanTool = manifest.tools.find((entry) => entry.name === "plan_scene_changes");
+assert.equal(scenePlanTool.risk, "read");
+assert.equal(scenePlanTool.readOnly, true);
+assert.deepEqual(scenePlanTool.inputKeys, ["changes", "sceneId", "sceneName"]);
 
 const applyPlanTool = manifest.tools.find((entry) => entry.name === "apply_bridge_plan");
 assert.equal(applyPlanTool.risk, "write");

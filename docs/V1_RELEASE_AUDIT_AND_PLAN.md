@@ -4,7 +4,7 @@ Last verified: 2026-05-21
 
 ## Summary
 
-`FoundryCodexBridge` is currently a strong local-only FoundryVTT control bridge, not just a proof of concept. Version `0.2.9` exposes a shared registry of 43 MCP/daemon tools, supports direct MCP discovery plus `call_bridge_tool` fallback dispatch, includes a guarded local Foundry app lifecycle restart workflow for explicit worlds, adds high-level read-only live-world intelligence, and introduces previewable journal/page transactions.
+`FoundryCodexBridge` is currently a strong local-only FoundryVTT control bridge, not just a proof of concept. Version `0.2.10` exposes a shared registry of 44 MCP/daemon tools, supports direct MCP discovery plus `call_bridge_tool` fallback dispatch, includes a guarded local Foundry app lifecycle restart workflow for explicit worlds, adds high-level read-only live-world intelligence, and now supports previewable journal/page plus scene token/light/note transactions.
 
 The v1.0 release goal is **Guarded Power**: expand practical live-project ability substantially while preserving the current safety model: localhost daemon, bridge token, trusted GM session gate, redaction, backups before destructive edits, and explicit `dangerous=true` for raw GM script execution.
 
@@ -14,18 +14,18 @@ This document is the durable local roadmap. Keep it updated as v1.0 work lands.
 
 ### Verified State
 
-- Bridge/package/module version: `0.2.9`
+- Bridge/package/module version: `0.2.10`
 - Registry version: `1`
-- Registry checksum: `d756fb0d43467a4b82ee82f269c2b8efd72741eb1f37cff6456c722c82c27b9a`
-- Registered tools: `43`
+- Registry checksum: `7789e25c0c034fe802c30d26ec13b98066962bde8fb302bb1eea2f496320908a`
+- Registered tools: `44`
 - Live validation world: `scratch`
 - Live Foundry: `14.361`
 - Live system: `D35E 3.0.2`
-- Live bridge status: daemon verified at `0.2.9`; `bridge_self_check.ready=true`
-- Live module script version: `0.2.9`
-- Installed module manifest file version: `0.2.9`
+- Live bridge status: daemon verified at `0.2.10`; `bridge_self_check.ready=true`
+- Live module script version: `0.2.10`
+- Installed module manifest file version: `0.2.10`
 - Trusted GM sessions: `2` after visible Electron GM login plus managed bridge GM client restart validation
-- Runtime event health: no errors; only Foundry V1 Application deprecation warnings from compatibility UI paths
+- Runtime event health: no errors; Foundry deprecation warnings only from compatibility/runtime read paths
 - Current self-check action items: none
 
 Do not use `return-to-undermountain` for validation unless explicitly requested.
@@ -43,6 +43,7 @@ The bridge currently provides:
 | Compact summaries | `summarize_actor`, `summarize_scene` | Useful D35E/world overview layer |
 | High-level read intelligence | `summarize_world_index`, `search_world`, `audit_scene_readiness`, `audit_actor_readiness`, `get_runtime_timeline` | Added in `0.2.8`; compact, read-only, trusted-session gated |
 | Previewable journal transactions | `plan_journal_changes`, `apply_bridge_plan` | Added in `0.2.9`; JournalEntry/Page create/update/append preview with explicit confirmed apply |
+| Previewable scene prep transactions | `plan_scene_changes`, `apply_bridge_plan` | Added in `0.2.10`; scene token/light/note create/update preview with explicit confirmed apply |
 | World/user/settings reads | `list_users`, `read_settings`, `export_world_snapshot` | Useful, redacted, still shallow |
 | Runtime diagnostics | `tail_logs`, `get_runtime_events`, `get_runtime_timeline`, `clear_runtime_events` | Good bounded live-session visibility, not persisted to disk |
 | World mutation | `create_document`, `update_document`, `create_embedded_document`, `update_embedded_document` | Powerful but low-level |
@@ -62,14 +63,15 @@ The bridge currently provides:
 - Captures live browser/runtime warnings, errors, UI notifications, and bridge request failures.
 - Provides compact world index, world search, scene readiness, actor readiness, and bounded runtime timeline reads through live Foundry APIs.
 - Provides the first guarded preview/apply write workflow for JournalEntry and JournalEntryPage create, update, and append operations.
+- Provides a first guarded preview/apply scene prep workflow for scene tokens, ambient lights, and notes.
 - Can restart the local Foundry application and re-establish a bridge-ready GM client through Windows Credential Manager-backed lifecycle automation.
 - Has smoke coverage for MCP registration parity, dynamic trust gates, GM authorization, fallback dispatch, and revocation.
 
 ### Limitations
 
 - Most write tools are raw Foundry document operations, so practical GM workflows still require knowing collection names, document shapes, and update payload structure.
-- The preview/diff/apply transaction model currently covers only journal entry/page create/update/append operations; broader document, scene, token, macro, and compendium workflows still rely on low-level tools.
-- There are no high-level guarded workflows yet for scene readiness writes, token placement, encounter setup, secret checks, macro authoring, or compendium imports.
+- The preview/diff/apply transaction model currently covers journal entry/page create/update/append operations and first-pass scene token/light/note prep; broader document, wall, scene activation, macro, and compendium workflows still rely on low-level tools.
+- There are no high-level guarded workflows yet for encounter setup packages, secret checks, macro authoring, compendium imports, actor/item patching, walls, or full rollback browsing.
 - Complex arguments are still exposed with broad schemas in several places, which weakens MCP usability and makes client-side validation thin.
 - `call_bridge_tool.args` works as a daemon object payload, but direct MCP exposure can be awkward in clients that flatten object args.
 - Output is mostly free-form JSON text; important tools do not yet provide structured output schemas.
@@ -173,24 +175,25 @@ Live findings from the `scratch` validation pass:
 
 ### Milestone 3: Previewable Write Workflows
 
-Status: started with the `0.2.9` previewable journal/page transaction slice.
+Status: expanded through the `0.2.10` previewable scene prep transaction slice.
 
 Goal: make mutation safer and more legible by separating planning from applying.
 
 Deliverables:
 
 - `plan_document_changes`: accepts high-level document intents and returns proposed Foundry operations without mutation.
-- `plan_scene_changes`: proposes token/light/wall/note/scene updates without mutation.
+- Completed in `0.2.10`: `plan_scene_changes` proposes scene token, ambient light, and note create/update operations without mutation.
+- Still pending: wall, scene activation, broader scene update, document-generic, actor/item, macro, and compendium import plans.
 - Completed in `0.2.9`: `plan_journal_changes` proposes journal entry/page create, update, and append operations with resolved target IDs, compact before/after previews, deterministic plan IDs and hashes, world ID, and expiration.
-- Completed in `0.2.9`: `apply_bridge_plan` executes only `plan_journal_changes` operations after explicit `planId`, `planHash`, and `worldId` confirmation.
+- Completed in `0.2.10`: `apply_bridge_plan` executes only `plan_journal_changes` and `plan_scene_changes` operations after explicit `planId`, `planHash`, and `worldId` confirmation.
 - Transaction metadata with operation IDs, target document IDs, before/after summaries, backup path when applicable, and rollback references.
 
 Acceptance:
 
-- In progress: journal plans are read-only and trusted-session gated.
-- Completed for journals in `0.2.9`: apply refuses stale, malformed, hash-mismatched, unconfirmed, cross-world, and non-journal plans.
-- Completed for journals in `0.2.9`: existing-entry/page updates create a backup first; pure creates do not.
-- In progress: smoke tests cover preview, refusal, apply, backup metadata, and redaction for journal/page plans.
+- In progress: journal and scene plans are read-only and trusted-session gated.
+- Completed for journals in `0.2.9` and scene prep in `0.2.10`: apply refuses stale, malformed, hash-mismatched, unconfirmed, cross-world, unknown-source, and unsupported-operation plans.
+- Completed for journals in `0.2.9` and scene prep in `0.2.10`: existing-document or embedded-document updates create a backup first; pure creates do not.
+- In progress: smoke tests cover preview, refusal, apply, backup metadata, and redaction for journal/page and first-pass scene prep plans.
 
 Live findings from the `scratch` validation pass:
 
@@ -203,6 +206,20 @@ Live findings from the `scratch` validation pass:
 - Confirmed `get_document` verified the final journal name, two pages, and appended content.
 - Confirmed `call_bridge_tool -> plan_journal_changes` returned a fallback preview plan.
 - Confirmed cleanup with existing backup-first `delete_document` removed the disposable journal.
+
+Live findings from the `scratch` Slice 4 validation pass:
+
+- Confirmed `restart_foundry_world({ worldId: "scratch", dangerous: true })` reloaded the installed `0.2.10` module into the visible app and managed GM client.
+- Confirmed `bridge_self_check.ready=true`, active daemon world `scratch`, Foundry `14.361`, D35E `3.0.2`, module/script/manifest version `0.2.10`, 2 trusted GM sessions, and registry checksum `7789e25c0c034fe802c30d26ec13b98066962bde8fb302bb1eea2f496320908a`.
+- Confirmed `list_bridge_tools` exposes 44 tools and includes `plan_scene_changes` as a trusted-session gated, direct MCP exposed, fallback-callable, read-only transaction planner.
+- Confirmed `plan_scene_changes -> create_token` and `apply_bridge_plan` created a disposable token on active `scratch` scene `MY3f7scvLqWb0vwA` using the live actor prototype when available.
+- Confirmed `plan_scene_changes -> update_token` moved/unhid/rotated the disposable token and returned backup metadata for the existing embedded-document update.
+- Confirmed `plan_scene_changes -> create_light` and `update_light` created and updated a disposable ambient light, with backup metadata for the update.
+- Confirmed a disposable journal/page anchor was created, then `plan_scene_changes -> create_note` and `update_note` created and updated a scene note linked to that journal/page, with backup metadata for the update.
+- Confirmed `inspect_scene` verified the final disposable token, light, and note state before cleanup.
+- Confirmed `call_bridge_tool -> plan_scene_changes` returned a fallback preview plan for a token update.
+- Confirmed cleanup removed the disposable token, light, note, and journal using existing backup-first delete tools.
+- Runtime health after validation: no errors; deprecation warnings only from Foundry V1 Application, `Scene#background`, grid template settings, and `Scene#templates` compatibility paths.
 
 ### Milestone 4: GM Workflow Tools
 
@@ -293,6 +310,7 @@ For live checks, use `scratch` unless explicitly redirected:
 { "method": "audit_actor_readiness", "args": { "includeItems": true, "itemLimit": 5 } }
 { "method": "get_runtime_timeline", "args": { "limit": 10 } }
 { "method": "plan_journal_changes", "args": { "action": "create_entry", "entryName": "Codex Disposable Validation", "pages": [{ "name": "Overview", "content": "<p>Disposable validation content.</p>" }] } }
+{ "method": "plan_scene_changes", "args": { "changes": [{ "action": "create_token", "data": { "name": "Codex Disposable Token", "x": 100, "y": 100, "hidden": true } }] } }
 { "method": "apply_bridge_plan", "args": { "plan": "<returned plan>", "confirmation": { "planId": "<returned planId>", "planHash": "<returned planHash>", "worldId": "scratch" } } }
 { "method": "call_bridge_tool", "args": { "method": "summarize_world_index", "args": { "includeSamples": false } } }
 ```
@@ -304,7 +322,7 @@ These are intentionally not decided in this roadmap and should be resolved immed
 - Whether v1.0 should introduce a separate `permissions.json` profile system or encode profiles in the trusted-world record.
 - Whether transaction plans should be stored on disk, in memory, or both.
 - Whether rollback should be automated for all supported operations or only assisted through backups and before/after metadata.
-- Which high-level GM workflow should be implemented next after the first journal/page transaction slice. Current best next candidate: scene/token prep helpers, followed by broader typed document plans.
+- Which high-level GM workflow should be implemented next after the first journal/page and scene token/light/note transaction slices. Current best next candidate: broader typed document plans or wall/scene-activation prep helpers.
 
 ## Non-Goals
 

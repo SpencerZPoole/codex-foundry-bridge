@@ -1,8 +1,8 @@
 {
-  "bridgeVersion": "0.2.9",
+  "bridgeVersion": "0.2.10",
   "registryVersion": 1,
-  "checksum": "d756fb0d43467a4b82ee82f269c2b8efd72741eb1f37cff6456c722c82c27b9a",
-  "toolCount": 43,
+  "checksum": "7789e25c0c034fe802c30d26ec13b98066962bde8fb302bb1eea2f496320908a",
+  "toolCount": 44,
   "fallback": {
     "tool": "call_bridge_tool",
     "note": "Use call_bridge_tool when direct MCP discovery lags; the target tool's normal safety gates still apply."
@@ -421,6 +421,23 @@
         "pageName",
         "pageType",
         "pages"
+      ]
+    },
+    {
+      "name": "plan_scene_changes",
+      "title": "Plan scene changes",
+      "description": "Preview Scene token, ambient light, and note create/update operations without mutating the world.",
+      "category": "transaction",
+      "outputShape": "BridgePlan",
+      "risk": "read",
+      "readOnly": true,
+      "requiresTrustedSession": true,
+      "directMcpExposure": true,
+      "fallbackCallable": true,
+      "inputKeys": [
+        "changes",
+        "sceneId",
+        "sceneName"
       ]
     },
     {

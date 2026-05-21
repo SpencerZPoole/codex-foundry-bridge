@@ -1,6 +1,6 @@
 {
   "name": "foundry-codex-bridge",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "private": true,
   "type": "module",
   "description": "Local Codex MCP bridge for a FoundryVTT GM session.",

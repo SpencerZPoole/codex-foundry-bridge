@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
-export const BRIDGE_VERSION = "0.2.9";
+export const BRIDGE_VERSION = "0.2.10";
 export const TOOL_REGISTRY_VERSION = 1;
 
 const AnyJson = z.any().optional();
@@ -11,6 +11,24 @@ const BridgePlanConfirmation = z.object({
   planId: z.string(),
   planHash: z.string(),
   worldId: z.string()
+});
+const SceneChangeObject = z.object({
+  action: z.string(),
+  sceneId: z.string().optional(),
+  sceneName: z.string().optional(),
+  tokenId: z.string().optional(),
+  tokenName: z.string().optional(),
+  actorId: z.string().optional(),
+  actorName: z.string().optional(),
+  lightId: z.string().optional(),
+  lightName: z.string().optional(),
+  noteId: z.string().optional(),
+  noteName: z.string().optional(),
+  journalId: z.string().optional(),
+  journalName: z.string().optional(),
+  pageId: z.string().optional(),
+  pageName: z.string().optional(),
+  data: z.record(z.string(), z.any()).optional()
 });
 
 const CATEGORY = {
@@ -352,6 +370,19 @@ export const TOOL_DEFINITIONS = [
         pageType: z.string().optional(),
         content: z.string().optional()
       })).optional()
+    },
+    risk: "read",
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.transaction, "BridgePlan")
+  },
+  {
+    name: "plan_scene_changes",
+    title: "Plan scene changes",
+    description: "Preview Scene token, ambient light, and note create/update operations without mutating the world.",
+    inputSchema: {
+      sceneId: z.string().optional(),
+      sceneName: z.string().optional(),
+      changes: z.array(SceneChangeObject)
     },
     risk: "read",
     requiresTrustedSession: true,

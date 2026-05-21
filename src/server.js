@@ -403,9 +403,15 @@ function bridgePlanHash(plan) {
 }
 
 function operationRequiresBackup(operation) {
+  const updateOperations = new Set([
+    "journal.update_entry",
+    "journal.update_page",
+    "scene.update_token",
+    "scene.update_light",
+    "scene.update_note"
+  ]);
   return operation?.backupRequired === true
-    || operation?.type === "journal.update_entry"
-    || operation?.type === "journal.update_page";
+    || updateOperations.has(operation?.type);
 }
 
 function validateBridgePlanOperation(operation) {
@@ -413,7 +419,13 @@ function validateBridgePlanOperation(operation) {
     "journal.create_entry",
     "journal.update_entry",
     "journal.create_page",
-    "journal.update_page"
+    "journal.update_page",
+    "scene.create_token",
+    "scene.update_token",
+    "scene.create_light",
+    "scene.update_light",
+    "scene.create_note",
+    "scene.update_note"
   ]);
   if (!operation || typeof operation !== "object") throw new Error("Bridge plan operation must be an object.");
   if (!operation.opId || typeof operation.opId !== "string") throw new Error("Bridge plan operation is missing opId.");
@@ -422,11 +434,23 @@ function validateBridgePlanOperation(operation) {
   if (!operation.data || typeof operation.data !== "object" || Array.isArray(operation.data)) {
     throw new Error(`Bridge plan operation ${operation.opId} is missing object data.`);
   }
-  if (operation.type !== "journal.create_entry" && !operation.target.journalId) {
+  if (operation.type.startsWith("journal.") && operation.type !== "journal.create_entry" && !operation.target.journalId) {
     throw new Error(`Bridge plan operation ${operation.opId} is missing journalId.`);
   }
   if (operation.type === "journal.update_page" && !operation.target.pageId) {
     throw new Error(`Bridge plan operation ${operation.opId} is missing pageId.`);
+  }
+  if (operation.type.startsWith("scene.") && !operation.target.sceneId) {
+    throw new Error(`Bridge plan operation ${operation.opId} is missing sceneId.`);
+  }
+  if (operation.type === "scene.update_token" && !operation.target.tokenId) {
+    throw new Error(`Bridge plan operation ${operation.opId} is missing tokenId.`);
+  }
+  if (operation.type === "scene.update_light" && !operation.target.lightId) {
+    throw new Error(`Bridge plan operation ${operation.opId} is missing lightId.`);
+  }
+  if (operation.type === "scene.update_note" && !operation.target.noteId) {
+    throw new Error(`Bridge plan operation ${operation.opId} is missing noteId.`);
   }
 }
 
@@ -437,8 +461,9 @@ function validateBridgePlanForApply(plan, confirmation = {}) {
   if (!confirmation || typeof confirmation !== "object" || Array.isArray(confirmation)) {
     throw new Error("apply_bridge_plan requires confirmation.");
   }
-  if (plan.kind !== "bridge-plan" || plan.source !== "plan_journal_changes" || plan.version !== 1) {
-    throw new Error("apply_bridge_plan only accepts version 1 plans produced by plan_journal_changes.");
+  const supportedSources = new Set(["plan_journal_changes", "plan_scene_changes"]);
+  if (plan.kind !== "bridge-plan" || !supportedSources.has(plan.source) || plan.version !== 1) {
+    throw new Error("apply_bridge_plan only accepts version 1 plans produced by plan_journal_changes or plan_scene_changes.");
   }
   if (!plan.planId || !plan.planHash || !plan.worldId) {
     throw new Error("apply_bridge_plan plan is missing planId, planHash, or worldId.");
@@ -804,6 +829,7 @@ async function executeTool(method, args = {}) {
     case "get_runtime_timeline":
     case "clear_runtime_events":
     case "plan_journal_changes":
+    case "plan_scene_changes":
     case "create_document":
     case "update_document":
     case "create_embedded_document":
