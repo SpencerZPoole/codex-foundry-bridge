@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -26,6 +27,10 @@ const highLevelReadTools = [
   "audit_actor_readiness",
   "get_runtime_timeline"
 ];
+const transactionTools = [
+  "plan_journal_changes",
+  "apply_bridge_plan"
+];
 
 fs.mkdirSync(path.join(foundryDataDir, "Data", "worlds", dynamicWorldId), { recursive: true });
 fs.mkdirSync(path.join(foundryDataDir, "Config"), { recursive: true });
@@ -35,6 +40,9 @@ assert.ok(registeredToolNames.includes("bridge_self_check"));
 assert.ok(registeredToolNames.includes("call_bridge_tool"));
 assert.ok(registeredToolNames.includes("list_compendium_packs"));
 for (const method of highLevelReadTools) {
+  assert.ok(registeredToolNames.includes(method), `${method} should be registered`);
+}
+for (const method of transactionTools) {
   assert.ok(registeredToolNames.includes(method), `${method} should be registered`);
 }
 
@@ -93,6 +101,69 @@ async function callBridge(method, args = {}, { expectOk = true } = {}) {
     assert.equal(body.ok, true, body.error);
   }
   return { response, body };
+}
+
+function canonicalizeForHash(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalizeForHash).join(",")}]`;
+  if (!value || typeof value !== "object") return JSON.stringify(value);
+  const keys = Object.keys(value).sort();
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${canonicalizeForHash(value[key])}`).join(",")}}`;
+}
+
+function bridgePlanHash(plan) {
+  const planForHash = { ...plan };
+  delete planForHash.planHash;
+  return createHash("sha256").update(canonicalizeForHash(planForHash)).digest("hex");
+}
+
+function signBridgePlan(plan) {
+  const signed = { ...plan };
+  signed.planHash = bridgePlanHash(signed);
+  return signed;
+}
+
+function makeBridgePlan({
+  worldId = dynamicWorldId,
+  operationType = "journal.create_entry",
+  backupRequired = false,
+  expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+  operation = null
+} = {}) {
+  const op = operation ?? {
+    opId: "op1",
+    type: operationType,
+    target: operationType === "journal.create_entry"
+      ? { documentName: "JournalEntry", name: "Smoke Test Journal" }
+      : { documentName: "JournalEntry", journalId: "journal-1", journalName: "Smoke Test Journal" },
+    data: operationType === "journal.create_entry"
+      ? { name: "Smoke Test Journal", pages: [] }
+      : { name: "Smoke Test Journal Updated" },
+    backupRequired
+  };
+  return signBridgePlan({
+    kind: "bridge-plan",
+    source: "plan_journal_changes",
+    version: 1,
+    planId: `smoke-${operationType}-${backupRequired ? "backup" : "create"}`,
+    worldId,
+    createdAt: new Date().toISOString(),
+    expiresAt,
+    action: operationType,
+    summary: "Smoke test bridge plan",
+    requiresBackup: backupRequired,
+    operations: [op],
+    warnings: [],
+    targets: {}
+  });
+}
+
+function confirmationForPlan(plan, overrides = {}) {
+  return {
+    planId: plan.planId,
+    planHash: plan.planHash,
+    worldId: plan.worldId,
+    ...overrides
+  };
 }
 
 let lifecycleMessageId = 0;
@@ -162,6 +233,16 @@ try {
     assert.equal(tool.directMcpExposure, true, `${method} should be directly exposed through MCP`);
     assert.equal(tool.fallbackCallable, true, `${method} should be fallback-callable`);
   }
+  const planTool = toolsCall.body.result.tools.find((entry) => entry.name === "plan_journal_changes");
+  assert.equal(planTool.category, "transaction");
+  assert.equal(planTool.readOnly, true);
+  assert.equal(planTool.requiresTrustedSession, true);
+  assert.equal(planTool.fallbackCallable, true);
+  const applyTool = toolsCall.body.result.tools.find((entry) => entry.name === "apply_bridge_plan");
+  assert.equal(applyTool.category, "transaction");
+  assert.equal(applyTool.readOnly, false);
+  assert.equal(applyTool.requiresTrustedSession, true);
+  assert.equal(applyTool.fallbackCallable, true);
   assert.equal(toolsCall.body.result.fallback.tool, "call_bridge_tool");
 
   const toolsViaFallback = await callBridge("call_bridge_tool", {
@@ -294,6 +375,31 @@ try {
     assert.match(refusedFallbackHighLevelRead.body.error, /trusted GM Foundry bridge session/);
   }
 
+  const refusedPlanJournal = await callBridge("plan_journal_changes", {
+    action: "create_entry",
+    entryName: "Smoke Test Journal"
+  }, { expectOk: false });
+  assert.equal(refusedPlanJournal.response.status, 500);
+  assert.match(refusedPlanJournal.body.error, /trusted GM Foundry bridge session/);
+
+  const preTrustPlan = makeBridgePlan();
+  const refusedApplyPlan = await callBridge("apply_bridge_plan", {
+    plan: preTrustPlan,
+    confirmation: confirmationForPlan(preTrustPlan)
+  }, { expectOk: false });
+  assert.equal(refusedApplyPlan.response.status, 500);
+  assert.match(refusedApplyPlan.body.error, /trusted GM Foundry bridge session/);
+
+  const refusedFallbackApplyPlan = await callBridge("call_bridge_tool", {
+    method: "apply_bridge_plan",
+    args: {
+      plan: preTrustPlan,
+      confirmation: confirmationForPlan(preTrustPlan)
+    }
+  }, { expectOk: false });
+  assert.equal(refusedFallbackApplyPlan.response.status, 500);
+  assert.match(refusedFallbackApplyPlan.body.error, /trusted GM Foundry bridge session/);
+
   const refusedFallbackLiveTool = await callBridge("call_bridge_tool", {
     method: "list_collections"
   }, { expectOk: false });
@@ -371,6 +477,86 @@ try {
     const fallbackCall = await callBridge("call_bridge_tool", { method, args });
     assert.equal(fallbackCall.body.result.method, method);
   }
+
+  const plannedJournal = await callBridge("plan_journal_changes", {
+    action: "create_entry",
+    entryName: "Smoke Test Journal"
+  });
+  assert.equal(plannedJournal.body.result.method, "plan_journal_changes");
+
+  const createPlan = makeBridgePlan();
+  const missingConfirmation = await callBridge("apply_bridge_plan", {
+    plan: createPlan
+  }, { expectOk: false });
+  assert.equal(missingConfirmation.response.status, 500);
+  assert.match(missingConfirmation.body.error, /confirmation/);
+
+  const badHashConfirmation = await callBridge("apply_bridge_plan", {
+    plan: createPlan,
+    confirmation: confirmationForPlan(createPlan, { planHash: "bad-hash" })
+  }, { expectOk: false });
+  assert.equal(badHashConfirmation.response.status, 500);
+  assert.match(badHashConfirmation.body.error, /planHash/);
+
+  const wrongWorldPlan = makeBridgePlan({ worldId: "wrong-smoke-world" });
+  const wrongWorld = await callBridge("apply_bridge_plan", {
+    plan: wrongWorldPlan,
+    confirmation: confirmationForPlan(wrongWorldPlan)
+  }, { expectOk: false });
+  assert.equal(wrongWorld.response.status, 500);
+  assert.match(wrongWorld.body.error, /world mismatch/);
+
+  const expiredPlan = makeBridgePlan({ expiresAt: new Date(Date.now() - 1000).toISOString() });
+  const expired = await callBridge("apply_bridge_plan", {
+    plan: expiredPlan,
+    confirmation: confirmationForPlan(expiredPlan)
+  }, { expectOk: false });
+  assert.equal(expired.response.status, 500);
+  assert.match(expired.body.error, /expired/);
+
+  const malformedPlan = makeBridgePlan({
+    operation: {
+      opId: "op1",
+      type: "journal.delete_entry",
+      target: { documentName: "JournalEntry", journalId: "journal-1" },
+      data: {},
+      backupRequired: true
+    },
+    backupRequired: true
+  });
+  const malformed = await callBridge("apply_bridge_plan", {
+    plan: malformedPlan,
+    confirmation: confirmationForPlan(malformedPlan)
+  }, { expectOk: false });
+  assert.equal(malformed.response.status, 500);
+  assert.match(malformed.body.error, /Unsupported bridge plan operation/);
+
+  const appliedViaFallback = await callBridge("call_bridge_tool", {
+    method: "apply_bridge_plan",
+    args: {
+      plan: createPlan,
+      confirmation: confirmationForPlan(createPlan)
+    }
+  });
+  assert.equal(appliedViaFallback.body.result.applied, true);
+  assert.equal(appliedViaFallback.body.result.backupRequired, false);
+  assert.equal(appliedViaFallback.body.result.backup, null);
+  assert.equal(appliedViaFallback.body.result.result.method, "apply_bridge_plan");
+
+  const updatePlan = makeBridgePlan({
+    operationType: "journal.update_entry",
+    backupRequired: true
+  });
+  const appliedUpdate = await callBridge("apply_bridge_plan", {
+    plan: updatePlan,
+    confirmation: confirmationForPlan(updatePlan)
+  });
+  assert.equal(appliedUpdate.body.result.applied, true);
+  assert.equal(appliedUpdate.body.result.backupRequired, true);
+  assert.equal(appliedUpdate.body.result.backup.ok, true);
+  assert.ok(appliedUpdate.body.result.backup.backupPath.includes(`${path.sep}backups${path.sep}`));
+  assert.equal(appliedUpdate.body.result.result.method, "apply_bridge_plan");
+  assert.equal(JSON.stringify(appliedUpdate.body.result).includes(token), false);
 
   const revoked = await callBridge("revoke_trusted_world", { worldId: dynamicWorldId });
   assert.deepEqual(revoked.body.result, { revoked: true, worldId: dynamicWorldId });

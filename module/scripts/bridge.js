@@ -1,10 +1,11 @@
 const MODULE_ID = "codex-foundry-bridge";
-const MODULE_VERSION = "0.2.8";
+const MODULE_VERSION = "0.2.9";
 const DEFAULT_URL = "ws://127.0.0.1:30123/foundry";
 const RECONNECT_MS = 5000;
 const MAX_RESULT_CHARS = 1_000_000;
 const MAX_RUNTIME_EVENTS = 250;
 const MAX_TIMELINE_EVENTS = 500;
+const BRIDGE_PLAN_TTL_MS = 30 * 60 * 1000;
 const RUNTIME_CAPTURE_FLAG = "__codexFoundryBridgeRuntimeCaptureInstalled";
 const CONSOLE_PATCH_FLAG = "__codexFoundryBridgeConsolePatched";
 const NOTIFICATION_PATCH_FLAG = "__codexFoundryBridgeNotificationsPatched";
@@ -42,6 +43,7 @@ let lifecycleRequestCounter = 0;
 const lifecyclePending = new Map();
 
 function isSensitiveField(key) {
+  if (String(key).toLowerCase() === "planhash") return false;
   return String(key).toLowerCase() === "token" || SENSITIVE_FIELD_PATTERN.test(key);
 }
 
@@ -980,6 +982,362 @@ function auditActorReadiness(args = {}) {
   });
 }
 
+function canonicalizeForHash(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalizeForHash).join(",")}]`;
+  if (!value || typeof value !== "object") return JSON.stringify(value);
+  const keys = Object.keys(value).sort();
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${canonicalizeForHash(value[key])}`).join(",")}}`;
+}
+
+async function sha256Hex(text) {
+  const bytes = new TextEncoder().encode(text);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function bridgePlanHash(plan) {
+  const planForHash = { ...plan };
+  delete planForHash.planHash;
+  return sha256Hex(canonicalizeForHash(planForHash));
+}
+
+function journalEntriesByName(name) {
+  const normalized = String(name ?? "").trim().toLowerCase();
+  if (!normalized) return [];
+  return Array.from(game.journal.values()).filter((entry) => entry.name?.toLowerCase() === normalized);
+}
+
+function resolveJournalEntryForPlan(args) {
+  if (args.journalId) {
+    const entry = game.journal.get(args.journalId);
+    if (!entry) throw new Error(`JournalEntry not found: ${args.journalId}`);
+    return entry;
+  }
+  if (args.journalName) {
+    const matches = journalEntriesByName(args.journalName);
+    if (matches.length > 1) throw new Error(`JournalEntry name is ambiguous: ${args.journalName}`);
+    if (!matches.length) throw new Error(`JournalEntry not found: ${args.journalName}`);
+    return matches[0];
+  }
+  throw new Error("journalId or journalName is required.");
+}
+
+function resolveJournalPageForPlan(entry, args) {
+  if (args.pageId) {
+    const page = entry.pages?.get(args.pageId);
+    if (!page) throw new Error(`JournalEntryPage not found: ${args.pageId}`);
+    return page;
+  }
+  if (args.pageName) {
+    const normalized = String(args.pageName).trim().toLowerCase();
+    const matches = Array.from(entry.pages?.values() ?? []).filter((page) => page.name?.toLowerCase() === normalized);
+    if (matches.length > 1) throw new Error(`JournalEntryPage name is ambiguous: ${args.pageName}`);
+    if (!matches.length) throw new Error(`JournalEntryPage not found: ${args.pageName}`);
+    return matches[0];
+  }
+  throw new Error("pageId or pageName is required.");
+}
+
+function assertTextPageType(pageType = "text") {
+  const normalized = String(pageType || "text").toLowerCase();
+  if (normalized !== "text") throw new Error(`Only text journal pages are supported in this slice: ${pageType}`);
+  return "text";
+}
+
+function journalTextData(content) {
+  return {
+    content: String(content ?? ""),
+    format: CONST.JOURNAL_ENTRY_PAGE_FORMATS?.HTML ?? 1
+  };
+}
+
+function journalPageData({ name, pageName, type, pageType, content }) {
+  return {
+    name: String(pageName ?? name ?? "Page").trim() || "Page",
+    type: assertTextPageType(pageType ?? type ?? "text"),
+    text: journalTextData(content)
+  };
+}
+
+function journalPageContent(page) {
+  return page?.text?.content ?? page?.system?.text?.content ?? "";
+}
+
+function journalPagePreview(pageOrData) {
+  const content = journalPageContent(pageOrData) || pageOrData?.text?.content || "";
+  return redact({
+    id: pageOrData?.id ?? pageOrData?._id ?? null,
+    name: pageOrData?.name ?? null,
+    type: pageOrData?.type ?? "text",
+    contentLength: String(content ?? "").length,
+    textPreview: stripHtml(content)
+  });
+}
+
+function journalEntryPreview(entryOrData) {
+  const pages = entryOrData?.pages?.values
+    ? Array.from(entryOrData.pages.values())
+    : Array.isArray(entryOrData?.pages)
+      ? entryOrData.pages
+      : [];
+  return redact({
+    id: entryOrData?.id ?? entryOrData?._id ?? null,
+    name: entryOrData?.name ?? null,
+    folder: typeof entryOrData?.folder === "string"
+      ? entryOrData.folder
+      : entryOrData?.folder?.id ?? entryOrData?.folder ?? null,
+    pageCount: pages.length,
+    pages: pages.slice(0, 5).map(journalPagePreview)
+  });
+}
+
+function operationPreview(operation) {
+  return {
+    before: operation.before ?? null,
+    after: operation.after ?? null
+  };
+}
+
+function makePlanOperation(opId, type, target, data, preview = {}, backupRequired = false) {
+  return redact({
+    opId,
+    type,
+    target,
+    data,
+    backupRequired,
+    ...operationPreview(preview)
+  });
+}
+
+function normalizedInitialPages(args) {
+  const pages = Array.isArray(args.pages) ? args.pages : [];
+  return pages.map((page, index) => journalPageData({
+    name: page.name ?? page.pageName ?? `Page ${index + 1}`,
+    type: page.type,
+    pageType: page.pageType,
+    content: page.content ?? ""
+  }));
+}
+
+function assertPlanHasChanges(changes, message) {
+  if (!Object.keys(changes).length) throw new Error(message);
+  return changes;
+}
+
+async function finalizeBridgePlan(plan) {
+  const partialHash = await bridgePlanHash(plan);
+  plan.planId = `${plan.source}-${plan.worldId}-${partialHash.slice(0, 12)}`;
+  plan.planHash = await bridgePlanHash(plan);
+  return redact(plan);
+}
+
+async function planJournalChanges(args = {}) {
+  const action = String(args.action ?? "").trim();
+  if (!action) throw new Error("plan_journal_changes requires action.");
+  const createdAt = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + BRIDGE_PLAN_TTL_MS).toISOString();
+  const operations = [];
+  const warnings = [];
+  const targets = {};
+
+  if (action === "create_entry") {
+    const name = String(args.entryName ?? args.journalName ?? "").trim();
+    if (!name) throw new Error("create_entry requires entryName.");
+    const pages = normalizedInitialPages(args);
+    const data = {
+      name,
+      folder: args.folderId ?? null,
+      pages
+    };
+    operations.push(makePlanOperation(
+      "op1",
+      "journal.create_entry",
+      { documentName: "JournalEntry", name },
+      data,
+      { before: null, after: journalEntryPreview(data) },
+      false
+    ));
+    targets.entryName = name;
+  } else if (action === "update_entry") {
+    const entry = resolveJournalEntryForPlan(args);
+    const data = {};
+    if (args.entryName != null) data.name = String(args.entryName).trim();
+    if (args.folderId != null) data.folder = args.folderId || null;
+    assertPlanHasChanges(data, "update_entry requires entryName or folderId.");
+    operations.push(makePlanOperation(
+      "op1",
+      "journal.update_entry",
+      { documentName: "JournalEntry", journalId: entry.id, journalName: entry.name },
+      data,
+      {
+        before: journalEntryPreview(entry),
+        after: journalEntryPreview({
+          id: entry.id,
+          name: data.name ?? entry.name,
+          folder: data.folder ?? entry.folder?.id ?? null,
+          pages: Array.from(entry.pages?.values() ?? [])
+        })
+      },
+      true
+    ));
+    targets.journalId = entry.id;
+    targets.journalName = entry.name;
+  } else if (action === "create_page") {
+    const entry = resolveJournalEntryForPlan(args);
+    const data = journalPageData({
+      pageName: args.pageName,
+      pageType: args.pageType,
+      content: args.content ?? ""
+    });
+    operations.push(makePlanOperation(
+      "op1",
+      "journal.create_page",
+      { documentName: "JournalEntryPage", journalId: entry.id, journalName: entry.name },
+      data,
+      { before: null, after: journalPagePreview(data) },
+      false
+    ));
+    targets.journalId = entry.id;
+    targets.journalName = entry.name;
+  } else if (action === "update_page") {
+    const entry = resolveJournalEntryForPlan(args);
+    const page = resolveJournalPageForPlan(entry, args);
+    const data = {};
+    if (args.pageName != null) data.name = String(args.pageName).trim();
+    if (args.pageType != null) data.type = assertTextPageType(args.pageType);
+    if (args.content != null) data.text = journalTextData(args.content);
+    assertPlanHasChanges(data, "update_page requires pageName, pageType, or content.");
+    operations.push(makePlanOperation(
+      "op1",
+      "journal.update_page",
+      { documentName: "JournalEntryPage", journalId: entry.id, journalName: entry.name, pageId: page.id, pageName: page.name },
+      data,
+      {
+        before: journalPagePreview(page),
+        after: journalPagePreview({
+          id: page.id,
+          name: data.name ?? page.name,
+          type: data.type ?? page.type,
+          text: data.text ?? page.text
+        })
+      },
+      true
+    ));
+    targets.journalId = entry.id;
+    targets.journalName = entry.name;
+    targets.pageId = page.id;
+    targets.pageName = page.name;
+  } else if (action === "append_page_section") {
+    const entry = resolveJournalEntryForPlan(args);
+    const page = resolveJournalPageForPlan(entry, args);
+    const content = String(args.content ?? "");
+    if (!content.trim()) throw new Error("append_page_section requires non-empty content.");
+    assertTextPageType(page.type);
+    const existing = journalPageContent(page);
+    const separator = existing.trim() ? "\n\n" : "";
+    const appended = `${existing}${separator}${content}`;
+    const data = { text: journalTextData(appended) };
+    operations.push(makePlanOperation(
+      "op1",
+      "journal.update_page",
+      { documentName: "JournalEntryPage", journalId: entry.id, journalName: entry.name, pageId: page.id, pageName: page.name },
+      data,
+      {
+        before: journalPagePreview(page),
+        after: journalPagePreview({ id: page.id, name: page.name, type: page.type, text: data.text })
+      },
+      true
+    ));
+    targets.journalId = entry.id;
+    targets.journalName = entry.name;
+    targets.pageId = page.id;
+    targets.pageName = page.name;
+  } else {
+    throw new Error(`Unsupported journal plan action: ${action}`);
+  }
+
+  const requiresBackup = operations.some((operation) => operation.backupRequired === true);
+  return finalizeBridgePlan({
+    kind: "bridge-plan",
+    source: "plan_journal_changes",
+    version: 1,
+    planId: null,
+    worldId: game.world.id,
+    createdAt,
+    expiresAt,
+    action,
+    summary: `${action} (${operations.length} journal operation${operations.length === 1 ? "" : "s"})`,
+    requiresBackup,
+    operations,
+    warnings,
+    targets
+  });
+}
+
+function assertBridgePlanConfirmation(plan, confirmation = {}) {
+  if (!plan || typeof plan !== "object") throw new Error("apply_bridge_plan requires plan.");
+  if (plan.kind !== "bridge-plan" || plan.source !== "plan_journal_changes") {
+    throw new Error("apply_bridge_plan only accepts plans produced by plan_journal_changes.");
+  }
+  if (!Array.isArray(plan.operations) || !plan.operations.length) {
+    throw new Error("apply_bridge_plan requires at least one operation.");
+  }
+  if (confirmation.planId !== plan.planId) throw new Error("apply_bridge_plan planId confirmation mismatch.");
+  if (confirmation.planHash !== plan.planHash) throw new Error("apply_bridge_plan planHash confirmation mismatch.");
+  if (confirmation.worldId !== plan.worldId) throw new Error("apply_bridge_plan worldId confirmation mismatch.");
+  if (plan.worldId !== game.world.id) {
+    throw new Error(`apply_bridge_plan world mismatch: plan=${plan.worldId}, active=${game.world.id}`);
+  }
+  if (!Number.isFinite(Date.parse(plan.expiresAt)) || Date.parse(plan.expiresAt) < Date.now()) {
+    throw new Error("apply_bridge_plan plan has expired.");
+  }
+}
+
+async function applyBridgePlan(args = {}) {
+  const plan = args.plan;
+  assertBridgePlanConfirmation(plan, args.confirmation ?? {});
+  const expectedHash = await bridgePlanHash(plan);
+  if (expectedHash !== plan.planHash) throw new Error("apply_bridge_plan planHash mismatch.");
+
+  const results = [];
+  for (const operation of plan.operations) {
+    if (operation.type === "journal.create_entry") {
+      const created = await JournalEntry.create(operation.data ?? {});
+      results.push({ opId: operation.opId, type: operation.type, ok: true, document: journalEntryPreview(created) });
+    } else if (operation.type === "journal.update_entry") {
+      const entry = game.journal.get(operation.target?.journalId);
+      if (!entry) throw new Error(`JournalEntry not found: ${operation.target?.journalId}`);
+      const updated = await entry.update(operation.data ?? {});
+      results.push({ opId: operation.opId, type: operation.type, ok: true, document: journalEntryPreview(updated) });
+    } else if (operation.type === "journal.create_page") {
+      const entry = game.journal.get(operation.target?.journalId);
+      if (!entry) throw new Error(`JournalEntry not found: ${operation.target?.journalId}`);
+      const created = await entry.createEmbeddedDocuments("JournalEntryPage", [operation.data ?? {}]);
+      results.push({ opId: operation.opId, type: operation.type, ok: true, documents: created.map(journalPagePreview) });
+    } else if (operation.type === "journal.update_page") {
+      const entry = game.journal.get(operation.target?.journalId);
+      if (!entry) throw new Error(`JournalEntry not found: ${operation.target?.journalId}`);
+      const page = entry.pages?.get(operation.target?.pageId);
+      if (!page) throw new Error(`JournalEntryPage not found: ${operation.target?.pageId}`);
+      const updated = await page.update(operation.data ?? {});
+      results.push({ opId: operation.opId, type: operation.type, ok: true, document: journalPagePreview(updated) });
+    } else {
+      throw new Error(`Unsupported bridge plan operation: ${operation.type}`);
+    }
+  }
+
+  return redact({
+    applied: true,
+    planId: plan.planId,
+    planHash: plan.planHash,
+    worldId: plan.worldId,
+    operationCount: results.length,
+    results
+  });
+}
+
 function safeEvalScript(source, context = {}) {
   const asyncFunction = Object.getPrototypeOf(async function () {}).constructor;
   return asyncFunction(
@@ -1188,6 +1546,12 @@ async function handleBridgeRequest(method, args = {}) {
 
     case "clear_runtime_events":
       return clearRuntimeEvents();
+
+    case "plan_journal_changes":
+      return planJournalChanges(args);
+
+    case "apply_bridge_plan":
+      return applyBridgePlan(args);
 
     case "create_document": {
       const documentClass = getDocumentClass(args.documentName);

@@ -72,6 +72,8 @@ Useful MCP/daemon tools:
 - `list_compendium_packs`, `search_compendium`, and `get_compendium_document` read live Foundry compendium APIs without scraping pack storage.
 - `summarize_actor` and `summarize_scene` provide compact read-only D35E/world summaries.
 - `summarize_world_index`, `search_world`, `audit_scene_readiness`, `audit_actor_readiness`, and `get_runtime_timeline` provide higher-level read-only world intelligence through the live trusted GM session.
+- `plan_journal_changes` previews JournalEntry and JournalEntryPage create/update/append operations without mutating the world.
+- `apply_bridge_plan` applies a returned journal plan only after explicit `planId`, `planHash`, and `worldId` confirmation. Existing-document updates create a backup first.
 
 ## Capability Manifest
 
@@ -86,9 +88,10 @@ Fallback examples:
 { "method": "bridge_self_check" }
 { "method": "search_compendium", "args": { "pack": "D35E.spells", "query": "acid arrow", "limit": 5 } }
 { "method": "summarize_world_index", "args": { "includeSamples": true, "sampleLimit": 3 } }
+{ "method": "plan_journal_changes", "args": { "action": "create_entry", "entryName": "Codex Prep Notes", "pages": [{ "name": "Overview", "content": "<p>Draft notes.</p>" }] } }
 ```
 
-The fallback is not a privilege bypass. High-risk tools still require their normal arguments and gates, such as `run_gm_script` requiring `dangerous=true` and a trusted GM session.
+The fallback is not a privilege bypass. High-risk tools still require their normal arguments and gates, such as `run_gm_script` requiring `dangerous=true` and a trusted GM session. `apply_bridge_plan` still requires the full plan plus matching confirmation values returned by the preview step.
 
 ## Foundry Lifecycle Restart
 
@@ -130,9 +133,10 @@ That helper refuses to run while Foundry is open and backs up `settings.db` firs
 
 - Live world edits go through Foundry document APIs, not raw `.db` writes.
 - Destructive document tools create a timestamped backup under `backups/`.
-- Secrets, hashes, license/admin keys, and token-like fields are redacted from tool results.
+- Secrets, credential hashes, license/admin keys, and token-like fields are redacted from tool results. Transaction `planHash` values are intentionally returned because they are confirmation IDs, not secrets.
 - `run_gm_script` requires `dangerous=true`.
 - `restart_foundry_world` requires `dangerous=true`, explicit `worldId`, and Windows Credential Manager credentials when passwords are configured.
+- `plan_journal_changes` is preview-only. `apply_bridge_plan` is the only transaction writer and refuses missing confirmation, hash mismatch, world mismatch, expired plans, malformed operations, and plans not produced by `plan_journal_changes`.
 - Lifecycle credential setup requires a trusted GM session and stores secrets only in Windows Credential Manager.
 - Live-world tools require a connected, trusted GM session; unknown worlds stay pending until authorized by the GM.
 - Read-only intelligence tools require the same trusted GM session as other live-world inspection tools.

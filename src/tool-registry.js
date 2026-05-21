@@ -1,11 +1,17 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
-export const BRIDGE_VERSION = "0.2.8";
+export const BRIDGE_VERSION = "0.2.9";
 export const TOOL_REGISTRY_VERSION = 1;
 
 const AnyJson = z.any().optional();
 const AnyObject = z.record(z.string(), z.any()).optional();
+const BridgePlanObject = z.record(z.string(), z.any());
+const BridgePlanConfirmation = z.object({
+  planId: z.string(),
+  planHash: z.string(),
+  worldId: z.string()
+});
 
 const CATEGORY = {
   diagnostics: "diagnostics",
@@ -13,6 +19,7 @@ const CATEGORY = {
   liveRead: "live-read",
   localRead: "local-read",
   diagnosticWrite: "diagnostic-write",
+  transaction: "transaction",
   liveWrite: "live-write",
   destructive: "destructive",
   execute: "execute",
@@ -323,6 +330,44 @@ export const TOOL_DEFINITIONS = [
     risk: "read",
     requiresTrustedSession: true,
     ...capabilityMetadata(CATEGORY.liveRead, "WorldSnapshot")
+  },
+  {
+    name: "plan_journal_changes",
+    title: "Plan journal changes",
+    description: "Preview JournalEntry and JournalEntryPage create/update operations without mutating the world.",
+    inputSchema: {
+      action: z.string(),
+      journalId: z.string().optional(),
+      journalName: z.string().optional(),
+      entryName: z.string().optional(),
+      folderId: z.string().optional(),
+      pageId: z.string().optional(),
+      pageName: z.string().optional(),
+      pageType: z.string().optional(),
+      content: z.string().optional(),
+      pages: z.array(z.object({
+        name: z.string().optional(),
+        pageName: z.string().optional(),
+        type: z.string().optional(),
+        pageType: z.string().optional(),
+        content: z.string().optional()
+      })).optional()
+    },
+    risk: "read",
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.transaction, "BridgePlan")
+  },
+  {
+    name: "apply_bridge_plan",
+    title: "Apply bridge plan",
+    description: "Apply a confirmed bridge transaction plan through the trusted GM session.",
+    inputSchema: {
+      plan: BridgePlanObject,
+      confirmation: BridgePlanConfirmation
+    },
+    risk: "write",
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.transaction, "BridgePlanApplyResult")
   },
   {
     name: "create_document",

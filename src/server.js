@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -83,6 +84,7 @@ function redact(value) {
 }
 
 function isSensitiveField(key) {
+  if (String(key).toLowerCase() === "planhash") return false;
   return String(key).toLowerCase() === "token" || SENSITIVE_FIELD_PATTERN.test(key);
 }
 
@@ -384,6 +386,106 @@ async function backupWorld() {
     note: report.skipped.length
       ? "Some files were locked or unreadable. See backup-metadata.json for skipped paths."
       : "File copy completed without skipped files."
+  };
+}
+
+function canonicalizeForHash(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalizeForHash).join(",")}]`;
+  if (!value || typeof value !== "object") return JSON.stringify(value);
+  const keys = Object.keys(value).sort();
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${canonicalizeForHash(value[key])}`).join(",")}}`;
+}
+
+function bridgePlanHash(plan) {
+  const planForHash = { ...plan };
+  delete planForHash.planHash;
+  return createHash("sha256").update(canonicalizeForHash(planForHash)).digest("hex");
+}
+
+function operationRequiresBackup(operation) {
+  return operation?.backupRequired === true
+    || operation?.type === "journal.update_entry"
+    || operation?.type === "journal.update_page";
+}
+
+function validateBridgePlanOperation(operation) {
+  const allowed = new Set([
+    "journal.create_entry",
+    "journal.update_entry",
+    "journal.create_page",
+    "journal.update_page"
+  ]);
+  if (!operation || typeof operation !== "object") throw new Error("Bridge plan operation must be an object.");
+  if (!operation.opId || typeof operation.opId !== "string") throw new Error("Bridge plan operation is missing opId.");
+  if (!allowed.has(operation.type)) throw new Error(`Unsupported bridge plan operation: ${operation.type}`);
+  if (!operation.target || typeof operation.target !== "object") throw new Error(`Bridge plan operation ${operation.opId} is missing target.`);
+  if (!operation.data || typeof operation.data !== "object" || Array.isArray(operation.data)) {
+    throw new Error(`Bridge plan operation ${operation.opId} is missing object data.`);
+  }
+  if (operation.type !== "journal.create_entry" && !operation.target.journalId) {
+    throw new Error(`Bridge plan operation ${operation.opId} is missing journalId.`);
+  }
+  if (operation.type === "journal.update_page" && !operation.target.pageId) {
+    throw new Error(`Bridge plan operation ${operation.opId} is missing pageId.`);
+  }
+}
+
+function validateBridgePlanForApply(plan, confirmation = {}) {
+  if (!plan || typeof plan !== "object" || Array.isArray(plan)) {
+    throw new Error("apply_bridge_plan requires a plan object.");
+  }
+  if (!confirmation || typeof confirmation !== "object" || Array.isArray(confirmation)) {
+    throw new Error("apply_bridge_plan requires confirmation.");
+  }
+  if (plan.kind !== "bridge-plan" || plan.source !== "plan_journal_changes" || plan.version !== 1) {
+    throw new Error("apply_bridge_plan only accepts version 1 plans produced by plan_journal_changes.");
+  }
+  if (!plan.planId || !plan.planHash || !plan.worldId) {
+    throw new Error("apply_bridge_plan plan is missing planId, planHash, or worldId.");
+  }
+  if (confirmation.planId !== plan.planId) throw new Error("apply_bridge_plan planId confirmation mismatch.");
+  if (confirmation.planHash !== plan.planHash) throw new Error("apply_bridge_plan planHash confirmation mismatch.");
+  if (confirmation.worldId !== plan.worldId) throw new Error("apply_bridge_plan worldId confirmation mismatch.");
+  const activeWorld = activeWorldId();
+  if (!activeWorld || plan.worldId !== activeWorld) {
+    throw new Error(`apply_bridge_plan world mismatch: plan=${plan.worldId}, active=${activeWorld ?? "none"}`);
+  }
+  const expiresAt = Date.parse(plan.expiresAt);
+  if (!Number.isFinite(expiresAt) || expiresAt < Date.now()) {
+    throw new Error("apply_bridge_plan plan has expired.");
+  }
+  const expectedHash = bridgePlanHash(plan);
+  if (expectedHash !== plan.planHash) {
+    throw new Error("apply_bridge_plan planHash mismatch.");
+  }
+  if (!Array.isArray(plan.operations) || !plan.operations.length) {
+    throw new Error("apply_bridge_plan requires at least one operation.");
+  }
+  for (const operation of plan.operations) validateBridgePlanOperation(operation);
+  return {
+    plan,
+    backupRequired: plan.operations.some(operationRequiresBackup)
+  };
+}
+
+async function applyBridgePlan(args = {}) {
+  if (!activeSession()) {
+    throw new Error("No connected trusted GM Foundry bridge session. Open the world as GM, activate the module, set the bridge token, and authorize this world.");
+  }
+  const { plan, backupRequired } = validateBridgePlanForApply(args.plan, args.confirmation);
+  const backup = backupRequired ? await backupWorld() : null;
+  const applied = await sendFoundryRequest("apply_bridge_plan", {
+    plan,
+    confirmation: args.confirmation
+  });
+  return {
+    applied: true,
+    planId: plan.planId,
+    planHash: plan.planHash,
+    worldId: plan.worldId,
+    backupRequired,
+    backup,
+    result: applied
   };
 }
 
@@ -701,6 +803,7 @@ async function executeTool(method, args = {}) {
     case "get_runtime_events":
     case "get_runtime_timeline":
     case "clear_runtime_events":
+    case "plan_journal_changes":
     case "create_document":
     case "update_document":
     case "create_embedded_document":
@@ -718,6 +821,8 @@ async function executeTool(method, args = {}) {
       const deleted = await sendFoundryRequest(method, args);
       return { backup, deleted };
     }
+    case "apply_bridge_plan":
+      return applyBridgePlan(args);
     case "run_gm_script":
       if (args.dangerous !== true) throw new Error("run_gm_script requires dangerous=true");
       return sendFoundryRequest(method, args);

@@ -25,6 +25,10 @@ const highLevelReadTools = [
   "audit_actor_readiness",
   "get_runtime_timeline"
 ];
+const transactionTools = [
+  "plan_journal_changes",
+  "apply_bridge_plan"
+];
 
 assert.deepEqual(manifest, generatedManifest);
 assert.equal(manifest.bridgeVersion, BRIDGE_VERSION);
@@ -75,6 +79,23 @@ for (const name of highLevelReadTools) {
   assert.equal(tool.directMcpExposure, true, `${name} direct MCP exposure`);
   assert.equal(tool.fallbackCallable, true, `${name} fallback callable`);
 }
+
+for (const name of transactionTools) {
+  const tool = manifest.tools.find((entry) => entry.name === name);
+  assert.ok(tool, `Manifest missing transaction tool: ${name}`);
+  assert.equal(tool.category, "transaction", `${name} category`);
+  assert.equal(tool.requiresTrustedSession, true, `${name} trusted session gate`);
+  assert.equal(tool.directMcpExposure, true, `${name} direct MCP exposure`);
+  assert.equal(tool.fallbackCallable, true, `${name} fallback callable`);
+}
+
+const journalPlanTool = manifest.tools.find((entry) => entry.name === "plan_journal_changes");
+assert.equal(journalPlanTool.risk, "read");
+assert.equal(journalPlanTool.readOnly, true);
+
+const applyPlanTool = manifest.tools.find((entry) => entry.name === "apply_bridge_plan");
+assert.equal(applyPlanTool.risk, "write");
+assert.equal(applyPlanTool.readOnly, false);
 
 const client = new Client({ name: "foundry-codex-bridge-manifest", version: "0.0.0" });
 const transport = new StdioClientTransport({

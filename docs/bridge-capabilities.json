@@ -1,8 +1,8 @@
 {
-  "bridgeVersion": "0.2.8",
+  "bridgeVersion": "0.2.9",
   "registryVersion": 1,
-  "checksum": "8d5f87740149976ed66b4b266fbdcafddb9880dd597dc9335ddbdb3b0929a996",
-  "toolCount": 41,
+  "checksum": "d756fb0d43467a4b82ee82f269c2b8efd72741eb1f37cff6456c722c82c27b9a",
+  "toolCount": 43,
   "fallback": {
     "tool": "call_bridge_tool",
     "note": "Use call_bridge_tool when direct MCP discovery lags; the target tool's normal safety gates still apply."
@@ -398,6 +398,46 @@
       "directMcpExposure": true,
       "fallbackCallable": true,
       "inputKeys": []
+    },
+    {
+      "name": "plan_journal_changes",
+      "title": "Plan journal changes",
+      "description": "Preview JournalEntry and JournalEntryPage create/update operations without mutating the world.",
+      "category": "transaction",
+      "outputShape": "BridgePlan",
+      "risk": "read",
+      "readOnly": true,
+      "requiresTrustedSession": true,
+      "directMcpExposure": true,
+      "fallbackCallable": true,
+      "inputKeys": [
+        "action",
+        "content",
+        "entryName",
+        "folderId",
+        "journalId",
+        "journalName",
+        "pageId",
+        "pageName",
+        "pageType",
+        "pages"
+      ]
+    },
+    {
+      "name": "apply_bridge_plan",
+      "title": "Apply bridge plan",
+      "description": "Apply a confirmed bridge transaction plan through the trusted GM session.",
+      "category": "transaction",
+      "outputShape": "BridgePlanApplyResult",
+      "risk": "write",
+      "readOnly": false,
+      "requiresTrustedSession": true,
+      "directMcpExposure": true,
+      "fallbackCallable": true,
+      "inputKeys": [
+        "confirmation",
+        "plan"
+      ]
     },
     {
       "name": "create_document",
