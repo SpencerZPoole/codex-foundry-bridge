@@ -10,6 +10,14 @@ The v1.0 release goal is **Guarded Power**: expand practical live-project abilit
 
 This document is the durable local roadmap. Keep it updated as v1.0 work lands.
 
+## Market Positioning Snapshot
+
+A public-peer comparison and monetization note is tracked in `docs/MARKET_POSITIONING_AND_MONETIZATION.md`.
+
+The short version: `FoundryCodexBridge` should not try to win by being the broadest raw Foundry MCP. Public peers already expose wider general gameplay surfaces, hosted service models, installers, MCP resources, dice/combat tools, map generation, and content-generation workflows. Our strongest differentiator is **Guarded Power**: local-first operation, trusted-world gates, self-diagnostics, capability manifests, preview/apply transactions, backup-first mutation, lifecycle restart, and live validation discipline for real campaign worlds.
+
+This suggests a monetizable lane, but not as "just another Foundry MCP." The best product shape is a local-first AI GM operations assistant with paid convenience and workflow layers: installer, guided setup, managed updates, rollback browser, compendium import, session prep, session secretary, macro workflows, and system-specific packs such as D35E.
+
 ## Current Capability Audit
 
 ### Verified State

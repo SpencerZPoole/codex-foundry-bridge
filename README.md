@@ -83,6 +83,7 @@ Useful MCP/daemon tools:
 
 - The v1.0 audit and roadmap are tracked in `docs/V1_RELEASE_AUDIT_AND_PLAN.md`.
 - `docs/bridge-capabilities.json` is generated from `src/tool-registry.js` and records bridge version, registry version, checksum, fallback tool, and public metadata for every registered tool.
+- Market comparison and monetization positioning are tracked in `docs/MARKET_POSITIONING_AND_MONETIZATION.md`.
 - Regenerate it with `npm run manifest`; verify committed content with `node scripts/generate-capability-manifest.mjs --check` or `npm test`.
 - Prefer direct MCP tools when they are visible. Use `call_bridge_tool` when MCP discovery is stale or incomplete; it still runs the target tool through the normal daemon dispatch and safety gates.
 
