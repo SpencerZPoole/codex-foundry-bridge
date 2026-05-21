@@ -1,5 +1,5 @@
 const MODULE_ID = "codex-foundry-bridge";
-const MODULE_VERSION = "0.2.5";
+const MODULE_VERSION = "0.2.6";
 const DEFAULT_URL = "ws://127.0.0.1:30123/foundry";
 const RECONNECT_MS = 5000;
 const MAX_RESULT_CHARS = 1_000_000;

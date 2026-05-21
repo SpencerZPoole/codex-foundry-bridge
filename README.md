@@ -68,6 +68,7 @@ Useful MCP/daemon tools:
 - `call_bridge_tool` invokes any fallback-callable registered bridge tool by name when direct MCP discovery lags.
 - `list_trusted_worlds` lists authorized world ids and metadata.
 - `revoke_trusted_world` removes a world from the trusted list.
+- `restart_foundry_world` fully restarts the local Foundry app, launches an explicit world, joins as GM, and verifies bridge readiness. It requires `dangerous=true` and local lifecycle credentials.
 - `list_compendium_packs`, `search_compendium`, and `get_compendium_document` read live Foundry compendium APIs without scraping pack storage.
 - `summarize_actor` and `summarize_scene` provide compact read-only D35E/world summaries.
 
@@ -87,6 +88,26 @@ Fallback examples:
 
 The fallback is not a privilege bypass. High-risk tools still require their normal arguments and gates, such as `run_gm_script` requiring `dangerous=true` and a trusted GM session.
 
+## Foundry Lifecycle Restart
+
+`restart_foundry_world` is a local lifecycle tool for recovering the bridge when Foundry must fully quit and relaunch. It is intentionally separate from live-world tools because the GM websocket is gone while Foundry is closed.
+
+Configure non-secret lifecycle settings and Windows Credential Manager secrets with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File G:\DungeonsAndDragonsDMFolder\FoundryCodexBridge\scripts\set-lifecycle-credentials.ps1 -WorldId scratch -GmUserId <gm-user-id> -SkipAdminPassword -AllowBlankGmPassword
+```
+
+Use `-SkipAdminPassword` only when Foundry has no administrator password configured. On Foundry 14, a non-empty `Config/admin.txt` in the Foundry user-data directory means the admin credential is required even though `options.json` no longer contains the hash. Use `-AllowBlankGmPassword` only for a GM user with an empty access key. Otherwise omit those switches and the script prompts locally for the administrator password and GM access key, storing them under Windows Credential Manager targets such as `FoundryCodexBridge/AdminPassword` and `FoundryCodexBridge/World/<worldId>/GM`. The generated `config/lifecycle.json` contains only non-secret settings and is ignored by git.
+
+Example daemon fallback call:
+
+```json
+{ "method": "restart_foundry_world", "args": { "worldId": "scratch", "dangerous": true } }
+```
+
+The restart tool still preserves the trusted-world model. It can launch and join the GM client, but live-world bridge tools become ready only for worlds already authorized in `config/trusted-worlds.json`.
+
 If the module cannot be enabled from the Foundry UI, close Foundry completely and run:
 
 ```powershell
@@ -101,6 +122,7 @@ That helper refuses to run while Foundry is open and backs up `settings.db` firs
 - Destructive document tools create a timestamped backup under `backups/`.
 - Secrets, hashes, license/admin keys, and token-like fields are redacted from tool results.
 - `run_gm_script` requires `dangerous=true`.
+- `restart_foundry_world` requires `dangerous=true`, explicit `worldId`, and Windows Credential Manager credentials when passwords are configured.
 - Live-world tools require a connected, trusted GM session; unknown worlds stay pending until authorized by the GM.
 - Read-only intelligence tools require the same trusted GM session as other live-world inspection tools.
 - Runtime diagnostics are observational only; they do not change Foundry behavior or world data.

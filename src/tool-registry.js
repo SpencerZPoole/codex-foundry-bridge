@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
-export const BRIDGE_VERSION = "0.2.5";
+export const BRIDGE_VERSION = "0.2.6";
 export const TOOL_REGISTRY_VERSION = 1;
 
 const AnyJson = z.any().optional();
@@ -16,6 +16,7 @@ const CATEGORY = {
   liveWrite: "live-write",
   destructive: "destructive",
   execute: "execute",
+  lifecycle: "lifecycle",
   localMaintenance: "local-maintenance"
 };
 
@@ -404,6 +405,28 @@ export const TOOL_DEFINITIONS = [
     risk: "read",
     requiresTrustedSession: false,
     ...capabilityMetadata(CATEGORY.localRead, "TrustedWorldList")
+  },
+  {
+    name: "restart_foundry_world",
+    title: "Restart Foundry world",
+    description: "Fully restart the local Foundry app, launch an explicit world, join as GM, and verify bridge readiness.",
+    inputSchema: {
+      worldId: z.string(),
+      gmUserId: z.string().optional(),
+      dangerous: z.boolean(),
+      timeouts: z.object({
+        stopGraceMs: z.number().optional(),
+        stopForceMs: z.number().optional(),
+        startupMs: z.number().optional(),
+        worldLaunchMs: z.number().optional(),
+        gmJoinMs: z.number().optional(),
+        bridgeReadyMs: z.number().optional(),
+        pollMs: z.number().optional()
+      }).optional()
+    },
+    risk: "dangerous-local-lifecycle",
+    requiresTrustedSession: false,
+    ...capabilityMetadata(CATEGORY.lifecycle, "FoundryLifecycleRestartResult")
   },
   {
     name: "revoke_trusted_world",

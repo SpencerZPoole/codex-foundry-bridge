@@ -4,7 +4,7 @@ Last verified: 2026-05-20
 
 ## Summary
 
-`FoundryCodexBridge` is currently a strong local-only FoundryVTT control bridge, not just a proof of concept. Version `0.2.5` exposes a shared registry of 35 MCP/daemon tools, supports direct MCP discovery plus `call_bridge_tool` fallback dispatch, and live-verifies registry parity against the `scratch` world on Foundry `14.361` / D35E `3.0.2`.
+`FoundryCodexBridge` is currently a strong local-only FoundryVTT control bridge, not just a proof of concept. Version `0.2.6` exposes a shared registry of 36 MCP/daemon tools, supports direct MCP discovery plus `call_bridge_tool` fallback dispatch, and adds a guarded local Foundry app lifecycle restart workflow for explicit worlds.
 
 The v1.0 release goal is **Guarded Power**: expand practical live-project ability substantially while preserving the current safety model: localhost daemon, bridge token, trusted GM session gate, redaction, backups before destructive edits, and explicit `dangerous=true` for raw GM script execution.
 
@@ -14,20 +14,19 @@ This document is the durable local roadmap. Keep it updated as v1.0 work lands.
 
 ### Verified State
 
-- Bridge/package/module version: `0.2.5`
+- Bridge/package/module version: `0.2.6`
 - Registry version: `1`
-- Registry checksum: `97bf00cd41734360729a730d89aa619e6929c807c2a579e1199563ae3abc809d`
-- Registered tools: `35`
+- Registry checksum: `4d2484dde5de42dd7dc9b891b59617a79e9234652690f2e2defe68e274cb59d4`
+- Registered tools: `36`
 - Live validation world: `scratch`
 - Live Foundry: `14.361`
 - Live system: `D35E 3.0.2`
-- Live bridge status: `bridge_self_check.ready=true`
-- Live module script version: `0.2.5`
-- Installed module manifest file version: `0.2.5`
-- Live Foundry package metadata cache: still reports manifest version `0.2.4` until the Foundry application is fully restarted
-- Trusted GM sessions: `1`
-- Runtime event health: `0` errors, `1` warning
-- Current self-check action items: restart Foundry application to refresh package metadata cache
+- Live bridge status: daemon verified at `0.2.6`; `bridge_self_check.ready=false` until the `scratch` GM client is relaunched
+- Live module script version: installed at `0.2.6`; live GM-client verification is pending admin credential setup
+- Installed module manifest file version: `0.2.6`
+- Trusted GM sessions: `0` after lifecycle restart testing stopped at Foundry setup authentication
+- Runtime event health: unavailable without an active trusted GM client
+- Current self-check action items: store the Foundry administrator credential as `FoundryCodexBridge/AdminPassword`, rerun `restart_foundry_world` for `scratch`, then verify `bridge_self_check.ready=true`
 
 Do not use `return-to-undermountain` for validation unless explicitly requested.
 
@@ -47,6 +46,7 @@ The bridge currently provides:
 | World mutation | `create_document`, `update_document`, `create_embedded_document`, `update_embedded_document` | Powerful but low-level |
 | Destructive mutation | `delete_document`, `delete_embedded_document` | Backup-first, still needs rollback browsing/apply metadata |
 | Chat/macros/scripts | `create_chat_message`, `run_macro`, `run_gm_script` | Powerful; `run_gm_script` remains emergency-only |
+| Local lifecycle | `restart_foundry_world` | Guarded full-app restart and GM auto-login for explicit trusted worlds |
 | Local maintenance | `list_installed_packages`, `read_foundry_options_sanitized`, `list_trusted_worlds`, `revoke_trusted_world`, `backup_world`, `install_or_update_bridge_module` | Practical local ops baseline |
 
 ### Strengths
@@ -58,6 +58,7 @@ The bridge currently provides:
 - Redacts token-like and sensitive fields in normal outputs.
 - Creates local backups before destructive document and embedded-document deletes.
 - Captures live browser/runtime warnings, errors, UI notifications, and bridge request failures.
+- Can restart the local Foundry application and re-establish a bridge-ready GM client through Windows Credential Manager-backed lifecycle automation.
 - Has smoke coverage for MCP registration parity, dynamic trust gates, GM authorization, fallback dispatch, and revocation.
 
 ### Limitations
@@ -71,6 +72,7 @@ The bridge currently provides:
 - Runtime diagnostics are recent and bounded, not a durable session event timeline.
 - There is no rollback browser, restore assistant, or transaction history viewer.
 - There are no permission/profile presets for different operating modes such as read-only, prep, session, maintenance, or dangerous-script-enabled.
+- Lifecycle restart targets a bridge-ready GM client, not guaranteed visible Electron-window interaction.
 - Documentation is good for setup, but sparse for real GM workflows and v1 compatibility guarantees.
 
 ## v1.0 Release Target
@@ -93,6 +95,20 @@ For v1.0, document and preserve:
 - `dangerous=true` requirement for raw GM script execution
 - `scratch` as the default validation world
 - no implicit validation or mutation of `return-to-undermountain`
+
+### Lifecycle Hardening Slice
+
+Status: implemented for the `0.2.6` development slice; full live `scratch` restart is blocked until the Foundry administrator password is stored in Windows Credential Manager.
+
+The `restart_foundry_world` tool is a guarded local lifecycle orchestrator, not a live-world mutation tool. It requires `dangerous=true`, an explicit `worldId`, and Windows Credential Manager credentials when Foundry administrator or GM passwords are configured. It preserves localhost, token auth, redaction, and trusted-world requirements: after restart, live-world tools become ready only if the launched world is already trusted.
+
+Live findings from the `scratch` validation pass:
+
+- Confirmed the tool fully gates on `dangerous=true`, explicit `worldId`, and the configured credential targets.
+- Confirmed force-stop fallback only targets processes whose executable path exactly matches the configured Foundry executable.
+- Added stale Foundry data lock recovery for `Config/options.json.lock` after force-stop, guarded by the same exact executable-process check.
+- Confirmed Foundry 14 uses `Config/admin.txt` as the durable setup-admin lock indicator; `options.json` alone is not sufficient for admin-password detection.
+- Current blocker: no Windows Credential Manager entry exists for `FoundryCodexBridge/AdminPassword`, so the daemon now refuses safely before touching the running app.
 
 ## v1.0 Roadmap
 
@@ -214,12 +230,14 @@ Use these as the baseline v1 closeout:
 
 ```powershell
 node --check src/tool-registry.js
+node --check src/lifecycle.js
 node --check src/mcp.js
 node --check src/server.js
 node --check module/scripts/bridge.js
 node --check scripts/generate-capability-manifest.mjs
 node --check test/smoke.js
 node --check test/manifest.js
+node --check test/lifecycle.js
 node scripts/generate-capability-manifest.mjs --check
 npm test
 node C:\Users\mrpoo\.codex\skills\local-security-gate\scripts\security-scan.mjs --root G:\DungeonsAndDragonsDMFolder\FoundryCodexBridge --changed-only
@@ -230,6 +248,7 @@ For live checks, use `scratch` unless explicitly redirected:
 ```json
 { "method": "bridge_self_check" }
 { "method": "list_bridge_tools" }
+{ "method": "restart_foundry_world", "args": { "worldId": "scratch", "dangerous": true } }
 { "method": "search_compendium", "args": { "pack": "D35E.spells", "query": "acid arrow", "limit": 5 } }
 { "method": "summarize_scene", "args": { "includeTokens": true, "tokenLimit": 5 } }
 ```

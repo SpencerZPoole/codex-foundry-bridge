@@ -4,3 +4,4 @@ bridge-token.txt
 backups/
 config/trusted-worlds.json
 config/trusted-worlds.json.tmp
+config/lifecycle.json

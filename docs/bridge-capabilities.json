@@ -1,8 +1,8 @@
 {
-  "bridgeVersion": "0.2.5",
+  "bridgeVersion": "0.2.6",
   "registryVersion": 1,
-  "checksum": "97bf00cd41734360729a730d89aa619e6929c807c2a579e1199563ae3abc809d",
-  "toolCount": 35,
+  "checksum": "4d2484dde5de42dd7dc9b891b59617a79e9234652690f2e2defe68e274cb59d4",
+  "toolCount": 36,
   "fallback": {
     "tool": "call_bridge_tool",
     "note": "Use call_bridge_tool when direct MCP discovery lags; the target tool's normal safety gates still apply."
@@ -508,6 +508,24 @@
       "directMcpExposure": true,
       "fallbackCallable": true,
       "inputKeys": []
+    },
+    {
+      "name": "restart_foundry_world",
+      "title": "Restart Foundry world",
+      "description": "Fully restart the local Foundry app, launch an explicit world, join as GM, and verify bridge readiness.",
+      "category": "lifecycle",
+      "outputShape": "FoundryLifecycleRestartResult",
+      "risk": "dangerous-local-lifecycle",
+      "readOnly": false,
+      "requiresTrustedSession": false,
+      "directMcpExposure": true,
+      "fallbackCallable": true,
+      "inputKeys": [
+        "dangerous",
+        "gmUserId",
+        "timeouts",
+        "worldId"
+      ]
     },
     {
       "name": "revoke_trusted_world",

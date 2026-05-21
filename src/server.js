@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { WebSocketServer } from "ws";
+import { restartFoundryWorld } from "./lifecycle.js";
 import {
   BRIDGE_VERSION,
   TOOL_DEFINITIONS,
@@ -664,6 +665,15 @@ async function executeTool(method, args = {}) {
       return sanitizeOptions(readJsonFile(paths().options));
     case "list_trusted_worlds":
       return { trustedWorlds: listTrustedWorlds(), path: TRUSTED_WORLDS_FILE };
+    case "restart_foundry_world":
+      return restartFoundryWorld(args, {
+        root: ROOT,
+        configDir: CONFIG_DIR,
+        foundryDataDir: FOUNDRY_DATA_DIR,
+        bridgeHost: BRIDGE_HOST,
+        bridgePort: BRIDGE_PORT,
+        bridgeToken: BRIDGE_TOKEN
+      });
     case "revoke_trusted_world":
       return revokeTrustedWorld(args.worldId);
     case "backup_world":
