@@ -587,14 +587,22 @@ async function listInstalledPackages() {
 
 async function callBridgeTool({ method, args = {} } = {}) {
   const targetMethod = String(method ?? "").trim();
+  const targetArgs = args ?? {};
   if (!targetMethod) throw new Error("call_bridge_tool requires method.");
+  const targetTool = toolDefinitionByName(targetMethod);
+  if (!targetTool) {
+    throw new Error(`Unknown bridge method: ${targetMethod}`);
+  }
   if (targetMethod === "call_bridge_tool") {
     throw new Error("call_bridge_tool cannot invoke itself.");
   }
-  if (!toolDefinitionByName(targetMethod)) {
-    throw new Error(`Unknown bridge method: ${targetMethod}`);
+  if (!targetTool.fallbackCallable) {
+    throw new Error(`call_bridge_tool cannot invoke ${targetMethod}.`);
   }
-  return executeTool(targetMethod, args ?? {});
+  if (typeof targetArgs !== "object" || Array.isArray(targetArgs)) {
+    throw new Error("call_bridge_tool args must be an object when provided.");
+  }
+  return executeTool(targetMethod, targetArgs);
 }
 
 async function executeTool(method, args = {}) {

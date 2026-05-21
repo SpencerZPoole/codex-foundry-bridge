@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import WebSocket from "ws";
-import { TOOL_DEFINITIONS, toolRegistryChecksum } from "../src/tool-registry.js";
+import { BRIDGE_VERSION, TOOL_DEFINITIONS, toolRegistryChecksum } from "../src/tool-registry.js";
 
 const token = process.env.CODEX_FOUNDRY_BRIDGE_TOKEN || "smoke-test-token";
 const port = 30124;
@@ -127,7 +127,7 @@ try {
   assert.equal(initialStatus.pendingAuthorizationSessions, 0);
 
   const toolsCall = await callBridge("list_bridge_tools");
-  assert.equal(toolsCall.body.result.bridgeVersion, "0.2.4");
+  assert.equal(toolsCall.body.result.bridgeVersion, BRIDGE_VERSION);
   assert.equal(toolsCall.body.result.checksum, toolRegistryChecksum());
   assert.deepEqual(
     toolsCall.body.result.tools.map((tool) => tool.name).sort(),
@@ -164,7 +164,7 @@ try {
   );
 
   const initialSelfCheck = await callBridge("bridge_self_check");
-  assert.equal(initialSelfCheck.body.result.bridgeVersion, "0.2.4");
+  assert.equal(initialSelfCheck.body.result.bridgeVersion, BRIDGE_VERSION);
   assert.equal(initialSelfCheck.body.result.daemon.trustedSessions, 0);
   assert.equal(initialSelfCheck.body.result.registry.checksum, toolRegistryChecksum());
   assert.equal(initialSelfCheck.body.result.registry.fallback.tool, "call_bridge_tool");
@@ -173,7 +173,7 @@ try {
   const selfCheckViaFallback = await callBridge("call_bridge_tool", {
     method: "bridge_self_check"
   });
-  assert.equal(selfCheckViaFallback.body.result.bridgeVersion, "0.2.4");
+  assert.equal(selfCheckViaFallback.body.result.bridgeVersion, BRIDGE_VERSION);
 
   const recursiveFallback = await callBridge("call_bridge_tool", {
     method: "call_bridge_tool",

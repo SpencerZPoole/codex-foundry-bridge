@@ -64,12 +64,19 @@ Useful MCP/daemon tools:
 
 - `foundry_status` shows trusted and pending sessions plus the trusted-world config path.
 - `bridge_self_check` reports daemon, module, version, runtime, path, log, and trusted-world health.
-- `list_bridge_tools` returns the shared tool registry with risk flags and checksum.
-- `call_bridge_tool` invokes any registered bridge tool by name when direct MCP discovery lags.
+- `list_bridge_tools` returns the shared tool registry with category, output shape, risk flags, direct MCP exposure, fallback support, and checksum.
+- `call_bridge_tool` invokes any fallback-callable registered bridge tool by name when direct MCP discovery lags.
 - `list_trusted_worlds` lists authorized world ids and metadata.
 - `revoke_trusted_world` removes a world from the trusted list.
 - `list_compendium_packs`, `search_compendium`, and `get_compendium_document` read live Foundry compendium APIs without scraping pack storage.
 - `summarize_actor` and `summarize_scene` provide compact read-only D35E/world summaries.
+
+## Capability Manifest
+
+- The v1.0 audit and roadmap are tracked in `docs/V1_RELEASE_AUDIT_AND_PLAN.md`.
+- `docs/bridge-capabilities.json` is generated from `src/tool-registry.js` and records bridge version, registry version, checksum, fallback tool, and public metadata for every registered tool.
+- Regenerate it with `npm run manifest`; verify committed content with `node scripts/generate-capability-manifest.mjs --check` or `npm test`.
+- Prefer direct MCP tools when they are visible. Use `call_bridge_tool` when MCP discovery is stale or incomplete; it still runs the target tool through the normal daemon dispatch and safety gates.
 
 Fallback examples:
 

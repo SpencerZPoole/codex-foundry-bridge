@@ -1,10 +1,33 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
-export const BRIDGE_VERSION = "0.2.4";
+export const BRIDGE_VERSION = "0.2.5";
 export const TOOL_REGISTRY_VERSION = 1;
 
 const AnyJson = z.any().optional();
+const AnyObject = z.record(z.string(), z.any()).optional();
+
+const CATEGORY = {
+  diagnostics: "diagnostics",
+  dispatch: "dispatch",
+  liveRead: "live-read",
+  localRead: "local-read",
+  diagnosticWrite: "diagnostic-write",
+  liveWrite: "live-write",
+  destructive: "destructive",
+  execute: "execute",
+  localMaintenance: "local-maintenance"
+};
+
+function capabilityMetadata(category, outputShape, overrides = {}) {
+  return {
+    category,
+    outputShape,
+    fallbackCallable: true,
+    directMcpExposure: true,
+    ...overrides
+  };
+}
 
 export const TOOL_DEFINITIONS = [
   {
@@ -13,7 +36,8 @@ export const TOOL_DEFINITIONS = [
     description: "Report Foundry runtime status, bridge daemon state, and active GM session metadata.",
     inputSchema: {},
     risk: "read",
-    requiresTrustedSession: false
+    requiresTrustedSession: false,
+    ...capabilityMetadata(CATEGORY.diagnostics, "FoundryStatusReport")
   },
   {
     name: "bridge_self_check",
@@ -21,7 +45,8 @@ export const TOOL_DEFINITIONS = [
     description: "Run a read-only bridge health check with diagnostics and actionable next steps.",
     inputSchema: {},
     risk: "read",
-    requiresTrustedSession: false
+    requiresTrustedSession: false,
+    ...capabilityMetadata(CATEGORY.diagnostics, "BridgeSelfCheckReport")
   },
   {
     name: "list_bridge_tools",
@@ -29,7 +54,8 @@ export const TOOL_DEFINITIONS = [
     description: "List bridge tool metadata, risk flags, and registry checksum.",
     inputSchema: {},
     risk: "read",
-    requiresTrustedSession: false
+    requiresTrustedSession: false,
+    ...capabilityMetadata(CATEGORY.diagnostics, "BridgeToolList")
   },
   {
     name: "call_bridge_tool",
@@ -37,10 +63,13 @@ export const TOOL_DEFINITIONS = [
     description: "Fallback dispatcher for invoking any registered bridge tool when direct MCP discovery lags.",
     inputSchema: {
       method: z.string(),
-      args: AnyJson
+      args: AnyObject
     },
     risk: "meta-dispatch",
-    requiresTrustedSession: false
+    requiresTrustedSession: false,
+    ...capabilityMetadata(CATEGORY.dispatch, "TargetToolResult", {
+      fallbackCallable: false
+    })
   },
   {
     name: "list_collections",
@@ -48,7 +77,8 @@ export const TOOL_DEFINITIONS = [
     description: "List live Foundry world collections from the connected GM session.",
     inputSchema: {},
     risk: "read",
-    requiresTrustedSession: true
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.liveRead, "CollectionSummary[]")
   },
   {
     name: "get_document",
@@ -60,7 +90,8 @@ export const TOOL_DEFINITIONS = [
       includeEmbedded: z.boolean().optional()
     },
     risk: "read",
-    requiresTrustedSession: true
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.liveRead, "FoundryDocument")
   },
   {
     name: "search_documents",
@@ -72,7 +103,8 @@ export const TOOL_DEFINITIONS = [
       limit: z.number().optional()
     },
     risk: "read",
-    requiresTrustedSession: true
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.liveRead, "DocumentSearchResult[]")
   },
   {
     name: "list_scenes",
@@ -80,7 +112,8 @@ export const TOOL_DEFINITIONS = [
     description: "List scenes in the active world.",
     inputSchema: {},
     risk: "read",
-    requiresTrustedSession: true
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.liveRead, "SceneSummary[]")
   },
   {
     name: "inspect_scene",
@@ -90,7 +123,8 @@ export const TOOL_DEFINITIONS = [
       id: z.string().optional()
     },
     risk: "read",
-    requiresTrustedSession: true
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.liveRead, "SceneDocument")
   },
   {
     name: "list_compendium_packs",
@@ -103,7 +137,8 @@ export const TOOL_DEFINITIONS = [
       limit: z.number().optional()
     },
     risk: "read",
-    requiresTrustedSession: true
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.liveRead, "CompendiumPackSummary[]")
   },
   {
     name: "search_compendium",
@@ -118,7 +153,8 @@ export const TOOL_DEFINITIONS = [
       fields: z.array(z.string()).optional()
     },
     risk: "read",
-    requiresTrustedSession: true
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.liveRead, "CompendiumSearchResult[]")
   },
   {
     name: "get_compendium_document",
@@ -130,7 +166,8 @@ export const TOOL_DEFINITIONS = [
       summarize: z.boolean().optional()
     },
     risk: "read",
-    requiresTrustedSession: true
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.liveRead, "CompendiumDocument")
   },
   {
     name: "summarize_actor",
@@ -142,7 +179,8 @@ export const TOOL_DEFINITIONS = [
       itemLimit: z.number().optional()
     },
     risk: "read",
-    requiresTrustedSession: true
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.liveRead, "ActorSummary")
   },
   {
     name: "summarize_scene",
@@ -154,7 +192,8 @@ export const TOOL_DEFINITIONS = [
       tokenLimit: z.number().optional()
     },
     risk: "read",
-    requiresTrustedSession: true
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.liveRead, "SceneSummary")
   },
   {
     name: "list_users",
@@ -162,7 +201,8 @@ export const TOOL_DEFINITIONS = [
     description: "List Foundry users from the live world with sensitive fields redacted.",
     inputSchema: {},
     risk: "read",
-    requiresTrustedSession: true
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.liveRead, "UserSummary[]")
   },
   {
     name: "read_settings",
@@ -172,7 +212,8 @@ export const TOOL_DEFINITIONS = [
       namespace: z.string().optional()
     },
     risk: "read",
-    requiresTrustedSession: true
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.liveRead, "SettingSummary[]")
   },
   {
     name: "tail_logs",
@@ -183,7 +224,8 @@ export const TOOL_DEFINITIONS = [
       limit: z.number().optional()
     },
     risk: "read",
-    requiresTrustedSession: false
+    requiresTrustedSession: false,
+    ...capabilityMetadata(CATEGORY.localRead, "LogLine[]")
   },
   {
     name: "get_runtime_events",
@@ -196,7 +238,8 @@ export const TOOL_DEFINITIONS = [
       since: z.string().optional()
     },
     risk: "read",
-    requiresTrustedSession: true
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.liveRead, "RuntimeEvent[]")
   },
   {
     name: "clear_runtime_events",
@@ -204,7 +247,8 @@ export const TOOL_DEFINITIONS = [
     description: "Clear the live GM-client runtime event buffer.",
     inputSchema: {},
     risk: "diagnostic-write",
-    requiresTrustedSession: true
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.diagnosticWrite, "RuntimeEventClearResult")
   },
   {
     name: "export_world_snapshot",
@@ -212,7 +256,8 @@ export const TOOL_DEFINITIONS = [
     description: "Create a sanitized live snapshot of collections and basic server metadata.",
     inputSchema: {},
     risk: "read",
-    requiresTrustedSession: true
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.liveRead, "WorldSnapshot")
   },
   {
     name: "create_document",
@@ -223,7 +268,8 @@ export const TOOL_DEFINITIONS = [
       data: AnyJson
     },
     risk: "write",
-    requiresTrustedSession: true
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.liveWrite, "CreatedDocument")
   },
   {
     name: "update_document",
@@ -235,7 +281,8 @@ export const TOOL_DEFINITIONS = [
       data: AnyJson
     },
     risk: "write",
-    requiresTrustedSession: true
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.liveWrite, "UpdatedDocument")
   },
   {
     name: "delete_document",
@@ -246,7 +293,8 @@ export const TOOL_DEFINITIONS = [
       id: z.string()
     },
     risk: "destructive-with-backup",
-    requiresTrustedSession: true
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.destructive, "DeleteResultWithBackup")
   },
   {
     name: "create_embedded_document",
@@ -259,7 +307,8 @@ export const TOOL_DEFINITIONS = [
       data: AnyJson
     },
     risk: "write",
-    requiresTrustedSession: true
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.liveWrite, "CreatedEmbeddedDocument")
   },
   {
     name: "update_embedded_document",
@@ -272,7 +321,8 @@ export const TOOL_DEFINITIONS = [
       data: AnyJson
     },
     risk: "write",
-    requiresTrustedSession: true
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.liveWrite, "UpdatedEmbeddedDocument")
   },
   {
     name: "delete_embedded_document",
@@ -285,7 +335,8 @@ export const TOOL_DEFINITIONS = [
       embeddedId: z.string()
     },
     risk: "destructive-with-backup",
-    requiresTrustedSession: true
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.destructive, "DeleteEmbeddedResultWithBackup")
   },
   {
     name: "create_chat_message",
@@ -298,7 +349,8 @@ export const TOOL_DEFINITIONS = [
       blind: z.boolean().optional()
     },
     risk: "write",
-    requiresTrustedSession: true
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.liveWrite, "ChatMessage")
   },
   {
     name: "run_macro",
@@ -310,7 +362,8 @@ export const TOOL_DEFINITIONS = [
       context: AnyJson
     },
     risk: "execute-foundry-macro",
-    requiresTrustedSession: true
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.execute, "MacroExecutionResult")
   },
   {
     name: "run_gm_script",
@@ -322,7 +375,8 @@ export const TOOL_DEFINITIONS = [
       dangerous: z.boolean()
     },
     risk: "dangerous-execute",
-    requiresTrustedSession: true
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.execute, "ScriptExecutionResult")
   },
   {
     name: "list_installed_packages",
@@ -330,7 +384,8 @@ export const TOOL_DEFINITIONS = [
     description: "List installed local systems, modules, and worlds from Foundry data.",
     inputSchema: {},
     risk: "read",
-    requiresTrustedSession: false
+    requiresTrustedSession: false,
+    ...capabilityMetadata(CATEGORY.localRead, "InstalledPackageReport")
   },
   {
     name: "read_foundry_options_sanitized",
@@ -338,7 +393,8 @@ export const TOOL_DEFINITIONS = [
     description: "Read Foundry options.json with secrets redacted.",
     inputSchema: {},
     risk: "read-sensitive-redacted",
-    requiresTrustedSession: false
+    requiresTrustedSession: false,
+    ...capabilityMetadata(CATEGORY.localRead, "SanitizedFoundryOptions")
   },
   {
     name: "list_trusted_worlds",
@@ -346,7 +402,8 @@ export const TOOL_DEFINITIONS = [
     description: "List Foundry worlds authorized to connect through this local bridge.",
     inputSchema: {},
     risk: "read",
-    requiresTrustedSession: false
+    requiresTrustedSession: false,
+    ...capabilityMetadata(CATEGORY.localRead, "TrustedWorldList")
   },
   {
     name: "revoke_trusted_world",
@@ -356,7 +413,8 @@ export const TOOL_DEFINITIONS = [
       worldId: z.string()
     },
     risk: "local-config-write",
-    requiresTrustedSession: false
+    requiresTrustedSession: false,
+    ...capabilityMetadata(CATEGORY.localMaintenance, "TrustedWorldRevocationResult")
   },
   {
     name: "backup_world",
@@ -364,7 +422,8 @@ export const TOOL_DEFINITIONS = [
     description: "Copy the active world directory to the bridge backup folder.",
     inputSchema: {},
     risk: "local-backup-write",
-    requiresTrustedSession: true
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.localMaintenance, "WorldBackupResult")
   },
   {
     name: "install_or_update_bridge_module",
@@ -372,7 +431,8 @@ export const TOOL_DEFINITIONS = [
     description: "Copy the bridge Foundry module into the local Foundry modules directory.",
     inputSchema: {},
     risk: "local-module-write",
-    requiresTrustedSession: false
+    requiresTrustedSession: false,
+    ...capabilityMetadata(CATEGORY.localMaintenance, "ModuleInstallResult")
   }
 ];
 
@@ -385,9 +445,13 @@ export function publicToolDefinition(tool) {
     name: tool.name,
     title: tool.title,
     description: tool.description,
+    category: tool.category,
+    outputShape: tool.outputShape,
     risk: tool.risk,
     readOnly: tool.risk === "read" || tool.risk === "read-sensitive-redacted",
     requiresTrustedSession: tool.requiresTrustedSession,
+    directMcpExposure: tool.directMcpExposure,
+    fallbackCallable: tool.fallbackCallable,
     inputKeys: Object.keys(tool.inputSchema ?? {}).sort()
   };
 }
@@ -401,6 +465,7 @@ export function listBridgeTools() {
       tool: "call_bridge_tool",
       note: "Use call_bridge_tool when direct MCP discovery lags; the target tool's normal safety gates still apply."
     },
+    toolCount: TOOL_DEFINITIONS.length,
     tools: TOOL_DEFINITIONS.map(publicToolDefinition)
   };
 }
