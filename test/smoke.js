@@ -30,6 +30,7 @@ const highLevelReadTools = [
 const transactionTools = [
   "plan_journal_changes",
   "plan_scene_changes",
+  "plan_document_changes",
   "apply_bridge_plan"
 ];
 
@@ -148,6 +149,12 @@ function defaultPlanTarget(operationType) {
   if (operationType === "scene.update_note") {
     return { documentName: "Note", sceneId: "scene-1", sceneName: "Smoke Scene", noteId: "note-1", journalId: "journal-1" };
   }
+  if (operationType === "document.create") {
+    return { documentName: "Item", collection: "items", id: null, name: "Smoke Test Item" };
+  }
+  if (operationType === "document.update") {
+    return { documentName: "Item", collection: "items", id: "item-1", name: "Smoke Test Item" };
+  }
   return { documentName: "Unknown" };
 }
 
@@ -160,13 +167,21 @@ function defaultPlanData(operationType) {
   if (operationType === "scene.update_light") return { _id: "light-1", x: 150, y: 150, hidden: false };
   if (operationType === "scene.create_note") return { x: 100, y: 100, entryId: "journal-1", text: "Smoke note" };
   if (operationType === "scene.update_note") return { _id: "note-1", x: 160, y: 160, text: "Updated smoke note" };
+  if (operationType === "document.create") return { name: "Smoke Test Item", type: "loot", img: "icons/svg/item-bag.svg" };
+  if (operationType === "document.update") return { name: "Smoke Test Item Updated" };
   return {};
+}
+
+function defaultPlanSource(operationType) {
+  if (operationType.startsWith("scene.")) return "plan_scene_changes";
+  if (operationType.startsWith("document.")) return "plan_document_changes";
+  return "plan_journal_changes";
 }
 
 function makeBridgePlan({
   worldId = dynamicWorldId,
   operationType = "journal.create_entry",
-  source = operationType.startsWith("scene.") ? "plan_scene_changes" : "plan_journal_changes",
+  source = defaultPlanSource(operationType),
   backupRequired = false,
   expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString(),
   operation = null
@@ -281,6 +296,11 @@ try {
   assert.equal(scenePlanTool.readOnly, true);
   assert.equal(scenePlanTool.requiresTrustedSession, true);
   assert.equal(scenePlanTool.fallbackCallable, true);
+  const documentPlanTool = toolsCall.body.result.tools.find((entry) => entry.name === "plan_document_changes");
+  assert.equal(documentPlanTool.category, "transaction");
+  assert.equal(documentPlanTool.readOnly, true);
+  assert.equal(documentPlanTool.requiresTrustedSession, true);
+  assert.equal(documentPlanTool.fallbackCallable, true);
   const applyTool = toolsCall.body.result.tools.find((entry) => entry.name === "apply_bridge_plan");
   assert.equal(applyTool.category, "transaction");
   assert.equal(applyTool.readOnly, false);
@@ -431,6 +451,12 @@ try {
   assert.equal(refusedPlanScene.response.status, 500);
   assert.match(refusedPlanScene.body.error, /trusted GM Foundry bridge session/);
 
+  const refusedPlanDocument = await callBridge("plan_document_changes", {
+    changes: [{ action: "create", documentName: "Item", data: { name: "Smoke Test Item", type: "loot" } }]
+  }, { expectOk: false });
+  assert.equal(refusedPlanDocument.response.status, 500);
+  assert.match(refusedPlanDocument.body.error, /trusted GM Foundry bridge session/);
+
   const preTrustPlan = makeBridgePlan();
   const refusedApplyPlan = await callBridge("apply_bridge_plan", {
     plan: preTrustPlan,
@@ -545,6 +571,18 @@ try {
   });
   assert.equal(plannedSceneViaFallback.body.result.method, "plan_scene_changes");
 
+  const plannedDocument = await callBridge("plan_document_changes", {
+    changes: [{ action: "create", documentName: "Item", data: { name: "Smoke Test Item", type: "loot" } }]
+  });
+  assert.equal(plannedDocument.body.result.method, "plan_document_changes");
+  const plannedDocumentViaFallback = await callBridge("call_bridge_tool", {
+    method: "plan_document_changes",
+    args: {
+      changes: [{ action: "create", documentName: "Folder", folderType: "Item", data: { name: "Smoke Test Folder" } }]
+    }
+  });
+  assert.equal(plannedDocumentViaFallback.body.result.method, "plan_document_changes");
+
   const createPlan = makeBridgePlan();
   const missingConfirmation = await callBridge("apply_bridge_plan", {
     plan: createPlan
@@ -626,13 +664,65 @@ try {
   assert.equal(missingSceneTarget.response.status, 500);
   assert.match(missingSceneTarget.body.error, /tokenId/);
 
+  for (const unsupportedDocumentName of ["Macro", "User", "Setting"]) {
+    const unsupportedDocumentPlan = makeBridgePlan({
+      source: "plan_document_changes",
+      operation: {
+        opId: "op1",
+        type: "document.create",
+        target: { documentName: unsupportedDocumentName, collection: `${unsupportedDocumentName.toLowerCase()}s`, name: `Smoke ${unsupportedDocumentName}` },
+        data: { name: `Smoke ${unsupportedDocumentName}` },
+        backupRequired: false
+      }
+    });
+    const unsupportedDocument = await callBridge("apply_bridge_plan", {
+      plan: unsupportedDocumentPlan,
+      confirmation: confirmationForPlan(unsupportedDocumentPlan)
+    }, { expectOk: false });
+    assert.equal(unsupportedDocument.response.status, 500);
+    assert.match(unsupportedDocument.body.error, /Unsupported document plan target/);
+  }
+
+  const missingDocumentDataPlan = makeBridgePlan({
+    source: "plan_document_changes",
+    operation: {
+      opId: "op1",
+      type: "document.update",
+      target: { documentName: "Item", collection: "items", id: "item-1", name: "Smoke Test Item" },
+      backupRequired: true
+    }
+  });
+  const missingDocumentData = await callBridge("apply_bridge_plan", {
+    plan: missingDocumentDataPlan,
+    confirmation: confirmationForPlan(missingDocumentDataPlan)
+  }, { expectOk: false });
+  assert.equal(missingDocumentData.response.status, 500);
+  assert.match(missingDocumentData.body.error, /missing object data/);
+
+  const missingDocumentTargetPlan = makeBridgePlan({
+    operationType: "document.update",
+    operation: {
+      opId: "op1",
+      type: "document.update",
+      target: { documentName: "Item", collection: "items", name: "Smoke Test Item" },
+      data: { name: "Missing Target" },
+      backupRequired: true
+    }
+  });
+  const missingDocumentTarget = await callBridge("apply_bridge_plan", {
+    plan: missingDocumentTargetPlan,
+    confirmation: confirmationForPlan(missingDocumentTargetPlan)
+  }, { expectOk: false });
+  assert.equal(missingDocumentTarget.response.status, 500);
+  assert.match(missingDocumentTarget.body.error, /document id/);
+
   const unknownSourcePlan = makeBridgePlan({ source: "plan_unknown_changes" });
   const unknownSource = await callBridge("apply_bridge_plan", {
     plan: unknownSourcePlan,
     confirmation: confirmationForPlan(unknownSourcePlan)
   }, { expectOk: false });
   assert.equal(unknownSource.response.status, 500);
-  assert.match(unknownSource.body.error, /plan_journal_changes or plan_scene_changes/);
+  assert.match(unknownSource.body.error, /plan_document_changes/);
 
   const appliedViaFallback = await callBridge("call_bridge_tool", {
     method: "apply_bridge_plan",
@@ -687,6 +777,33 @@ try {
   assert.equal(appliedSceneUpdate.body.result.backup.ok, true);
   assert.equal(appliedSceneUpdate.body.result.result.method, "apply_bridge_plan");
   assert.equal(JSON.stringify(appliedSceneUpdate.body.result).includes(token), false);
+
+  const documentCreatePlan = makeBridgePlan({ operationType: "document.create" });
+  const appliedDocumentCreate = await callBridge("call_bridge_tool", {
+    method: "apply_bridge_plan",
+    args: {
+      plan: documentCreatePlan,
+      confirmation: confirmationForPlan(documentCreatePlan)
+    }
+  });
+  assert.equal(appliedDocumentCreate.body.result.applied, true);
+  assert.equal(appliedDocumentCreate.body.result.backupRequired, false);
+  assert.equal(appliedDocumentCreate.body.result.backup, null);
+  assert.equal(appliedDocumentCreate.body.result.result.method, "apply_bridge_plan");
+
+  const documentUpdatePlan = makeBridgePlan({
+    operationType: "document.update",
+    backupRequired: true
+  });
+  const appliedDocumentUpdate = await callBridge("apply_bridge_plan", {
+    plan: documentUpdatePlan,
+    confirmation: confirmationForPlan(documentUpdatePlan)
+  });
+  assert.equal(appliedDocumentUpdate.body.result.applied, true);
+  assert.equal(appliedDocumentUpdate.body.result.backupRequired, true);
+  assert.equal(appliedDocumentUpdate.body.result.backup.ok, true);
+  assert.equal(appliedDocumentUpdate.body.result.result.method, "apply_bridge_plan");
+  assert.equal(JSON.stringify(appliedDocumentUpdate.body.result).includes(token), false);
 
   const revoked = await callBridge("revoke_trusted_world", { worldId: dynamicWorldId });
   assert.deepEqual(revoked.body.result, { revoked: true, worldId: dynamicWorldId });

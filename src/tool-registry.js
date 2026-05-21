@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
-export const BRIDGE_VERSION = "0.2.10";
+export const BRIDGE_VERSION = "0.2.11";
 export const TOOL_REGISTRY_VERSION = 1;
 
 const AnyJson = z.any().optional();
@@ -29,6 +29,14 @@ const SceneChangeObject = z.object({
   pageId: z.string().optional(),
   pageName: z.string().optional(),
   data: z.record(z.string(), z.any()).optional()
+});
+const DocumentChangeObject = z.object({
+  action: z.string(),
+  documentName: z.string(),
+  id: z.string().optional(),
+  name: z.string().optional(),
+  folderType: z.string().optional(),
+  data: z.record(z.string(), z.any())
 });
 
 const CATEGORY = {
@@ -383,6 +391,17 @@ export const TOOL_DEFINITIONS = [
       sceneId: z.string().optional(),
       sceneName: z.string().optional(),
       changes: z.array(SceneChangeObject)
+    },
+    risk: "read",
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.transaction, "BridgePlan")
+  },
+  {
+    name: "plan_document_changes",
+    title: "Plan document changes",
+    description: "Preview Actor, Item, Scene, and Folder create/update operations without mutating the world.",
+    inputSchema: {
+      changes: z.array(DocumentChangeObject)
     },
     risk: "read",
     requiresTrustedSession: true,

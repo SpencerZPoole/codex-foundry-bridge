@@ -74,7 +74,8 @@ Useful MCP/daemon tools:
 - `summarize_world_index`, `search_world`, `audit_scene_readiness`, `audit_actor_readiness`, and `get_runtime_timeline` provide higher-level read-only world intelligence through the live trusted GM session.
 - `plan_journal_changes` previews JournalEntry and JournalEntryPage create/update/append operations without mutating the world.
 - `plan_scene_changes` previews scene token, ambient light, and note create/update operations without mutating the world.
-- `apply_bridge_plan` applies a returned journal or scene plan only after explicit `planId`, `planHash`, and `worldId` confirmation. Existing-document updates create a backup first.
+- `plan_document_changes` previews Actor, Item, Scene, and Folder create/update operations without mutating the world.
+- `apply_bridge_plan` applies a returned journal, scene, or document plan only after explicit `planId`, `planHash`, and `worldId` confirmation. Existing-document updates create a backup first.
 
 ## Capability Manifest
 
@@ -91,13 +92,14 @@ Fallback examples:
 { "method": "summarize_world_index", "args": { "includeSamples": true, "sampleLimit": 3 } }
 { "method": "plan_journal_changes", "args": { "action": "create_entry", "entryName": "Codex Prep Notes", "pages": [{ "name": "Overview", "content": "<p>Draft notes.</p>" }] } }
 { "method": "plan_scene_changes", "args": { "changes": [{ "action": "create_token", "data": { "name": "Codex Marker", "x": 100, "y": 100, "hidden": true } }] } }
+{ "method": "plan_document_changes", "args": { "changes": [{ "action": "create", "documentName": "Item", "data": { "name": "Codex Marker Item", "type": "loot" } }] } }
 ```
 
 The fallback is not a privilege bypass. High-risk tools still require their normal arguments and gates, such as `run_gm_script` requiring `dangerous=true` and a trusted GM session. `apply_bridge_plan` still requires the full plan plus matching confirmation values returned by the preview step.
 
 ## Previewable Transactions
 
-`plan_journal_changes` and `plan_scene_changes` are preview-only. They return a `BridgePlan` with `planId`, `planHash`, `worldId`, expiration, resolved targets, compact before/after previews, warnings, and backup requirements. To mutate the world, pass the full plan to `apply_bridge_plan` with matching confirmation:
+`plan_journal_changes`, `plan_scene_changes`, and `plan_document_changes` are preview-only. They return a `BridgePlan` with `planId`, `planHash`, `worldId`, expiration, resolved targets, compact before/after previews, warnings, and backup requirements. To mutate the world, pass the full plan to `apply_bridge_plan` with matching confirmation:
 
 ```json
 {
@@ -110,7 +112,7 @@ The fallback is not a privilege bypass. High-risk tools still require their norm
 }
 ```
 
-Scene prep currently covers tokens, ambient lights, and notes only. It intentionally does not add walls, deletes, scene activation, actor/item mutation, macro authoring, or compendium import behavior.
+Document plans currently cover top-level Actor, Item, Scene, and Folder create/update operations. Folder creates require a `folderType` or `data.type` of `Actor`, `Item`, `Scene`, or `JournalEntry`. Macro create/update is intentionally deferred to a dedicated macro workflow. Scene prep currently covers tokens, ambient lights, and notes only. It intentionally does not add walls, deletes, scene activation, field-level actor/item rules automation, macro authoring, or compendium import behavior.
 
 ## Foundry Lifecycle Restart
 
@@ -155,7 +157,7 @@ That helper refuses to run while Foundry is open and backs up `settings.db` firs
 - Secrets, credential hashes, license/admin keys, and token-like fields are redacted from tool results. Transaction `planHash` values are intentionally returned because they are confirmation IDs, not secrets.
 - `run_gm_script` requires `dangerous=true`.
 - `restart_foundry_world` requires `dangerous=true`, explicit `worldId`, and Windows Credential Manager credentials when passwords are configured.
-- `plan_journal_changes` and `plan_scene_changes` are preview-only. `apply_bridge_plan` is the only transaction writer and refuses missing confirmation, hash mismatch, world mismatch, expired plans, malformed operations, and plans not produced by those preview tools.
+- `plan_journal_changes`, `plan_scene_changes`, and `plan_document_changes` are preview-only. `apply_bridge_plan` is the only transaction writer and refuses missing confirmation, hash mismatch, world mismatch, expired plans, malformed operations, and plans not produced by those preview tools.
 - Lifecycle credential setup requires a trusted GM session and stores secrets only in Windows Credential Manager.
 - Live-world tools require a connected, trusted GM session; unknown worlds stay pending until authorized by the GM.
 - Read-only intelligence tools require the same trusted GM session as other live-world inspection tools.

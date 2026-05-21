@@ -406,6 +406,7 @@ function operationRequiresBackup(operation) {
   const updateOperations = new Set([
     "journal.update_entry",
     "journal.update_page",
+    "document.update",
     "scene.update_token",
     "scene.update_light",
     "scene.update_note"
@@ -420,6 +421,8 @@ function validateBridgePlanOperation(operation) {
     "journal.update_entry",
     "journal.create_page",
     "journal.update_page",
+    "document.create",
+    "document.update",
     "scene.create_token",
     "scene.update_token",
     "scene.create_light",
@@ -439,6 +442,23 @@ function validateBridgePlanOperation(operation) {
   }
   if (operation.type === "journal.update_page" && !operation.target.pageId) {
     throw new Error(`Bridge plan operation ${operation.opId} is missing pageId.`);
+  }
+  if (operation.type.startsWith("document.")) {
+    const allowedDocumentNames = new Set(["Actor", "Item", "Scene", "Folder"]);
+    const allowedFolderTypes = new Set(["Actor", "Item", "Scene", "JournalEntry"]);
+    const documentName = operation.target.documentName;
+    if (!allowedDocumentNames.has(documentName)) {
+      throw new Error(`Unsupported document plan target: ${documentName ?? "(missing)"}`);
+    }
+    if (operation.type === "document.update" && !operation.target.id) {
+      throw new Error(`Bridge plan operation ${operation.opId} is missing document id.`);
+    }
+    if (documentName === "Folder") {
+      const folderType = operation.target.folderType ?? operation.data.type;
+      if (!allowedFolderTypes.has(folderType)) {
+        throw new Error(`Unsupported Folder plan type: ${folderType ?? "(missing)"}`);
+      }
+    }
   }
   if (operation.type.startsWith("scene.") && !operation.target.sceneId) {
     throw new Error(`Bridge plan operation ${operation.opId} is missing sceneId.`);
@@ -461,9 +481,9 @@ function validateBridgePlanForApply(plan, confirmation = {}) {
   if (!confirmation || typeof confirmation !== "object" || Array.isArray(confirmation)) {
     throw new Error("apply_bridge_plan requires confirmation.");
   }
-  const supportedSources = new Set(["plan_journal_changes", "plan_scene_changes"]);
+  const supportedSources = new Set(["plan_journal_changes", "plan_scene_changes", "plan_document_changes"]);
   if (plan.kind !== "bridge-plan" || !supportedSources.has(plan.source) || plan.version !== 1) {
-    throw new Error("apply_bridge_plan only accepts version 1 plans produced by plan_journal_changes or plan_scene_changes.");
+    throw new Error("apply_bridge_plan only accepts version 1 plans produced by plan_journal_changes, plan_scene_changes, or plan_document_changes.");
   }
   if (!plan.planId || !plan.planHash || !plan.worldId) {
     throw new Error("apply_bridge_plan plan is missing planId, planHash, or worldId.");
@@ -830,6 +850,7 @@ async function executeTool(method, args = {}) {
     case "clear_runtime_events":
     case "plan_journal_changes":
     case "plan_scene_changes":
+    case "plan_document_changes":
     case "create_document":
     case "update_document":
     case "create_embedded_document":

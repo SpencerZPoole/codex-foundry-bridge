@@ -4,7 +4,7 @@ Last verified: 2026-05-21
 
 ## Summary
 
-`FoundryCodexBridge` is currently a strong local-only FoundryVTT control bridge, not just a proof of concept. Version `0.2.10` exposes a shared registry of 44 MCP/daemon tools, supports direct MCP discovery plus `call_bridge_tool` fallback dispatch, includes a guarded local Foundry app lifecycle restart workflow for explicit worlds, adds high-level read-only live-world intelligence, and now supports previewable journal/page plus scene token/light/note transactions.
+`FoundryCodexBridge` is currently a strong local-only FoundryVTT control bridge, not just a proof of concept. Version `0.2.11` exposes a shared registry of 45 MCP/daemon tools, supports direct MCP discovery plus `call_bridge_tool` fallback dispatch, includes a guarded local Foundry app lifecycle restart workflow for explicit worlds, adds high-level read-only live-world intelligence, and now supports previewable journal/page, scene token/light/note, and typed top-level document transactions.
 
 The v1.0 release goal is **Guarded Power**: expand practical live-project ability substantially while preserving the current safety model: localhost daemon, bridge token, trusted GM session gate, redaction, backups before destructive edits, and explicit `dangerous=true` for raw GM script execution.
 
@@ -14,16 +14,16 @@ This document is the durable local roadmap. Keep it updated as v1.0 work lands.
 
 ### Verified State
 
-- Bridge/package/module version: `0.2.10`
+- Bridge/package/module version: `0.2.11`
 - Registry version: `1`
-- Registry checksum: `7789e25c0c034fe802c30d26ec13b98066962bde8fb302bb1eea2f496320908a`
-- Registered tools: `44`
+- Registry checksum: `dfff6baee51a36d3c5dae4597ccac5287ee60955270cf5e4e194e9b79f6d18a1`
+- Registered tools: `45`
 - Live validation world: `scratch`
 - Live Foundry: `14.361`
 - Live system: `D35E 3.0.2`
-- Live bridge status: daemon verified at `0.2.10`; `bridge_self_check.ready=true`
-- Live module script version: `0.2.10`
-- Installed module manifest file version: `0.2.10`
+- Live bridge status: daemon verified at `0.2.11`; `bridge_self_check.ready=true`
+- Live module script version: `0.2.11`
+- Installed module manifest file version: `0.2.11`
 - Trusted GM sessions: `2` after visible Electron GM login plus managed bridge GM client restart validation
 - Runtime event health: no errors; Foundry deprecation warnings only from compatibility/runtime read paths
 - Current self-check action items: none
@@ -44,6 +44,7 @@ The bridge currently provides:
 | High-level read intelligence | `summarize_world_index`, `search_world`, `audit_scene_readiness`, `audit_actor_readiness`, `get_runtime_timeline` | Added in `0.2.8`; compact, read-only, trusted-session gated |
 | Previewable journal transactions | `plan_journal_changes`, `apply_bridge_plan` | Added in `0.2.9`; JournalEntry/Page create/update/append preview with explicit confirmed apply |
 | Previewable scene prep transactions | `plan_scene_changes`, `apply_bridge_plan` | Added in `0.2.10`; scene token/light/note create/update preview with explicit confirmed apply |
+| Previewable top-level document transactions | `plan_document_changes`, `apply_bridge_plan` | Added in `0.2.11`; Actor/Item/Scene/Folder create/update preview with explicit confirmed apply |
 | World/user/settings reads | `list_users`, `read_settings`, `export_world_snapshot` | Useful, redacted, still shallow |
 | Runtime diagnostics | `tail_logs`, `get_runtime_events`, `get_runtime_timeline`, `clear_runtime_events` | Good bounded live-session visibility, not persisted to disk |
 | World mutation | `create_document`, `update_document`, `create_embedded_document`, `update_embedded_document` | Powerful but low-level |
@@ -175,25 +176,25 @@ Live findings from the `scratch` validation pass:
 
 ### Milestone 3: Previewable Write Workflows
 
-Status: expanded through the `0.2.10` previewable scene prep transaction slice.
+Status: expanded through the `0.2.11` typed top-level document transaction slice.
 
 Goal: make mutation safer and more legible by separating planning from applying.
 
 Deliverables:
 
-- `plan_document_changes`: accepts high-level document intents and returns proposed Foundry operations without mutation.
+- Completed in `0.2.11`: `plan_document_changes` accepts typed Actor, Item, Scene, and Folder create/update intents and returns proposed Foundry operations without mutation.
 - Completed in `0.2.10`: `plan_scene_changes` proposes scene token, ambient light, and note create/update operations without mutation.
-- Still pending: wall, scene activation, broader scene update, document-generic, actor/item, macro, and compendium import plans.
+- Still pending: wall, scene activation, broader typed actor/item/scene helpers, macro workflow, and compendium import plans.
 - Completed in `0.2.9`: `plan_journal_changes` proposes journal entry/page create, update, and append operations with resolved target IDs, compact before/after previews, deterministic plan IDs and hashes, world ID, and expiration.
-- Completed in `0.2.10`: `apply_bridge_plan` executes only `plan_journal_changes` and `plan_scene_changes` operations after explicit `planId`, `planHash`, and `worldId` confirmation.
+- Completed in `0.2.11`: `apply_bridge_plan` executes only `plan_journal_changes`, `plan_scene_changes`, and `plan_document_changes` operations after explicit `planId`, `planHash`, and `worldId` confirmation.
 - Transaction metadata with operation IDs, target document IDs, before/after summaries, backup path when applicable, and rollback references.
 
 Acceptance:
 
-- In progress: journal and scene plans are read-only and trusted-session gated.
-- Completed for journals in `0.2.9` and scene prep in `0.2.10`: apply refuses stale, malformed, hash-mismatched, unconfirmed, cross-world, unknown-source, and unsupported-operation plans.
-- Completed for journals in `0.2.9` and scene prep in `0.2.10`: existing-document or embedded-document updates create a backup first; pure creates do not.
-- In progress: smoke tests cover preview, refusal, apply, backup metadata, and redaction for journal/page and first-pass scene prep plans.
+- In progress: journal, scene, and top-level document plans are read-only and trusted-session gated.
+- Completed through `0.2.11`: apply refuses stale, malformed, hash-mismatched, unconfirmed, cross-world, unknown-source, and unsupported-operation plans.
+- Completed through `0.2.11`: existing-document or embedded-document updates create a backup first; pure creates do not.
+- In progress: smoke tests cover preview, refusal, apply, backup metadata, and redaction for journal/page, first-pass scene prep, and typed top-level document plans.
 
 Live findings from the `scratch` validation pass:
 
@@ -220,6 +221,19 @@ Live findings from the `scratch` Slice 4 validation pass:
 - Confirmed `call_bridge_tool -> plan_scene_changes` returned a fallback preview plan for a token update.
 - Confirmed cleanup removed the disposable token, light, note, and journal using existing backup-first delete tools.
 - Runtime health after validation: no errors; deprecation warnings only from Foundry V1 Application, `Scene#background`, grid template settings, and `Scene#templates` compatibility paths.
+
+Live findings from the `scratch` Slice 5 validation pass:
+
+- Confirmed `restart_foundry_world({ worldId: "scratch", dangerous: true })` reloaded the installed `0.2.11` module into the visible app and managed GM client.
+- Confirmed `bridge_self_check.ready=true`, active daemon world `scratch`, Foundry `14.361`, D35E `3.0.2`, module/script/manifest version `0.2.11`, 2 trusted GM sessions, and registry checksum `dfff6baee51a36d3c5dae4597ccac5287ee60955270cf5e4e194e9b79f6d18a1`.
+- Confirmed `list_bridge_tools` exposes 45 tools and includes `plan_document_changes` as a trusted-session gated, direct MCP exposed, fallback-callable, read-only transaction planner.
+- Confirmed `plan_document_changes -> document.create` and `apply_bridge_plan` created a disposable D35E `Item` of type `loot`; pure create required no backup.
+- Confirmed `plan_document_changes -> document.update` updated the disposable item name/image and returned backup metadata before mutation.
+- Confirmed `plan_document_changes -> document.create` and `apply_bridge_plan` created a disposable `Folder` with `folderType` `Item`; pure create required no backup.
+- Confirmed `plan_document_changes -> document.update` updated the disposable folder name/color and returned backup metadata before mutation.
+- Confirmed `get_document` and `search_world` saw the disposable item and folder after update; backup-first `delete_document` cleanup removed both, and a follow-up search found 0 `Codex Slice5 Disposable` documents.
+- Confirmed `call_bridge_tool -> plan_document_changes` returned a fallback preview without mutation.
+- Reviewed runtime diagnostics: no live errors; warnings were Foundry/D35E deprecation warnings for V1 Application and deprecated core grid template settings.
 
 ### Milestone 4: GM Workflow Tools
 

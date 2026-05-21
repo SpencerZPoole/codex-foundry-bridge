@@ -1,5 +1,5 @@
 const MODULE_ID = "codex-foundry-bridge";
-const MODULE_VERSION = "0.2.10";
+const MODULE_VERSION = "0.2.11";
 const DEFAULT_URL = "ws://127.0.0.1:30123/foundry";
 const RECONNECT_MS = 5000;
 const MAX_RESULT_CHARS = 1_000_000;
@@ -1093,7 +1093,11 @@ function journalEntryPreview(entryOrData) {
   });
 }
 
-const SUPPORTED_PLAN_SOURCES = new Set(["plan_journal_changes", "plan_scene_changes"]);
+const SUPPORTED_PLAN_SOURCES = new Set(["plan_journal_changes", "plan_scene_changes", "plan_document_changes"]);
+const DOCUMENT_PLAN_NAMES = new Set(["Actor", "Item", "Scene", "Folder"]);
+const FOLDER_PLAN_TYPES = new Set(["Actor", "Item", "Scene", "JournalEntry"]);
+const DOCUMENT_CHANGE_ACTIONS = new Set(["create", "update"]);
+const DOCUMENT_CHANGE_META_FIELDS = new Set(["action", "documentName", "id", "name", "folderType", "data"]);
 const SCENE_CHANGE_ACTIONS = new Set([
   "create_token",
   "update_token",
@@ -1491,6 +1495,131 @@ async function scenePlanOperation(args, change, index, warnings) {
   }, true);
 }
 
+function normalizeDocumentPlanName(documentName) {
+  const normalized = String(documentName ?? "").trim().toLowerCase();
+  for (const allowed of DOCUMENT_PLAN_NAMES) {
+    if (allowed.toLowerCase() === normalized) return allowed;
+  }
+  throw new Error(`Unsupported document plan target: ${documentName || "(empty)"}`);
+}
+
+function normalizeFolderPlanType(folderType) {
+  const normalized = String(folderType ?? "").trim().toLowerCase();
+  for (const allowed of FOLDER_PLAN_TYPES) {
+    if (allowed.toLowerCase() === normalized) return allowed;
+  }
+  throw new Error(`Unsupported Folder plan type: ${folderType || "(empty)"}`);
+}
+
+function documentPlanCollection(documentName) {
+  return getCollection(documentName);
+}
+
+function exactDocumentsByName(collection, name) {
+  const normalized = String(name ?? "").trim().toLowerCase();
+  if (!normalized) return [];
+  return Array.from(collection.values()).filter((document) => document.name?.toLowerCase() === normalized);
+}
+
+function resolveDocumentForPlan(documentName, change = {}) {
+  const collection = documentPlanCollection(documentName);
+  if (change.id) {
+    const document = collection.get(change.id);
+    if (!document) throw new Error(`${documentName} not found: ${change.id}`);
+    return document;
+  }
+  if (change.name) {
+    const matches = exactDocumentsByName(collection, change.name);
+    if (matches.length > 1) throw new Error(`${documentName} name is ambiguous: ${change.name}`);
+    if (!matches.length) throw new Error(`${documentName} not found: ${change.name}`);
+    return matches[0];
+  }
+  throw new Error(`${documentName} update requires id or exact non-ambiguous name.`);
+}
+
+function documentPlanData(change = {}, action, documentName) {
+  if (!change || typeof change !== "object" || Array.isArray(change)) throw new Error("Document change must be an object.");
+  const unknownTopLevelFields = Object.keys(change).filter((key) => !DOCUMENT_CHANGE_META_FIELDS.has(key));
+  if (unknownTopLevelFields.length) {
+    throw new Error(`document change has unsupported field(s): ${unknownTopLevelFields.join(", ")}`);
+  }
+  if (!DOCUMENT_CHANGE_ACTIONS.has(action)) throw new Error(`Unsupported document plan action: ${action || "(empty)"}`);
+  if (!change.data || typeof change.data !== "object" || Array.isArray(change.data)) {
+    throw new Error(`${documentName} ${action} requires data object.`);
+  }
+
+  const data = plainClone(change.data);
+  if (action === "create" && change.name != null && data.name == null) data.name = String(change.name).trim();
+  if (!Object.keys(data).length) throw new Error(`${documentName} ${action} requires at least one data field.`);
+  if (action === "create" && !String(data.name ?? "").trim()) {
+    throw new Error(`${documentName} create requires data.name or name.`);
+  }
+
+  if (documentName === "Folder") {
+    const folderType = action === "create" || data.type != null || change.folderType != null
+      ? normalizeFolderPlanType(change.folderType ?? data.type)
+      : null;
+    if (folderType) data.type = folderType;
+  }
+
+  return data;
+}
+
+function changedTopLevelKeys(data = {}) {
+  return Array.from(new Set(Object.keys(data).map((key) => String(key).split(".")[0]))).sort();
+}
+
+function documentPlanPreview(documentOrData, documentName) {
+  const source = plainObject(documentOrData);
+  const folderId = source.folder ?? documentOrData?.folder?.id ?? null;
+  const folder = folderId ? game.folders?.get(folderId) : documentOrData?.folder ?? null;
+  const preview = {
+    id: source._id ?? documentOrData?.id ?? null,
+    uuid: documentOrData?.uuid ?? null,
+    documentName,
+    name: source.name ?? documentOrData?.name ?? null,
+    type: source.type ?? documentOrData?.type ?? null,
+    folder: folderId,
+    folderName: folder?.name ?? null,
+    img: source.img ?? documentOrData?.img ?? null
+  };
+  if (documentName === "Scene") preview.active = source.active ?? documentOrData?.active ?? false;
+  return redact(preview);
+}
+
+function documentPlanTarget(documentName, document, data = {}) {
+  const collection = documentPlanCollection(documentName);
+  const target = {
+    documentName,
+    collection: collectionKey(collection),
+    id: document?.id ?? null,
+    name: document?.name ?? data.name ?? null
+  };
+  if (documentName === "Folder") target.folderType = data.type ?? document?.type ?? null;
+  return redact(target);
+}
+
+function documentPlanOperation(change, index) {
+  const opId = `op${index + 1}`;
+  const action = String(change?.action ?? "").trim();
+  const documentName = normalizeDocumentPlanName(change?.documentName);
+  const data = documentPlanData(change, action, documentName);
+  const changedKeys = changedTopLevelKeys(data);
+
+  if (action === "create") {
+    return makePlanOperation(opId, "document.create", documentPlanTarget(documentName, null, data), data, {
+      before: null,
+      after: documentPlanPreview(data, documentName)
+    }, false, changedKeys);
+  }
+
+  const document = resolveDocumentForPlan(documentName, change);
+  return makePlanOperation(opId, "document.update", documentPlanTarget(documentName, document, data), data, {
+    before: documentPlanPreview(document, documentName),
+    after: documentPlanPreview(mergePreviewData(document, data), documentName)
+  }, true, changedKeys);
+}
+
 function operationPreview(operation) {
   return {
     before: operation.before ?? null,
@@ -1498,15 +1627,17 @@ function operationPreview(operation) {
   };
 }
 
-function makePlanOperation(opId, type, target, data, preview = {}, backupRequired = false) {
-  return redact({
+function makePlanOperation(opId, type, target, data, preview = {}, backupRequired = false, changedKeys = null) {
+  const operation = {
     opId,
     type,
     target,
     data,
     backupRequired,
     ...operationPreview(preview)
-  });
+  };
+  if (Array.isArray(changedKeys)) operation.changedKeys = changedKeys;
+  return redact(operation);
 }
 
 function normalizedInitialPages(args) {
@@ -1714,10 +1845,37 @@ async function planSceneChanges(args = {}) {
   });
 }
 
+async function planDocumentChanges(args = {}) {
+  const changes = Array.isArray(args.changes) ? args.changes : [];
+  if (!changes.length) throw new Error("plan_document_changes requires at least one change.");
+
+  const createdAt = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + BRIDGE_PLAN_TTL_MS).toISOString();
+  const operations = changes.map((change, index) => documentPlanOperation(change, index));
+  const requiresBackup = operations.some((operation) => operation.backupRequired === true);
+  return finalizeBridgePlan({
+    kind: "bridge-plan",
+    source: "plan_document_changes",
+    version: 1,
+    planId: null,
+    worldId: game.world.id,
+    createdAt,
+    expiresAt,
+    action: "document_changes",
+    summary: `document_changes (${operations.length} document operation${operations.length === 1 ? "" : "s"})`,
+    requiresBackup,
+    operations,
+    warnings: [],
+    targets: {
+      documents: operations.map((operation) => operation.target)
+    }
+  });
+}
+
 function assertBridgePlanConfirmation(plan, confirmation = {}) {
   if (!plan || typeof plan !== "object") throw new Error("apply_bridge_plan requires plan.");
   if (plan.kind !== "bridge-plan" || !SUPPORTED_PLAN_SOURCES.has(plan.source) || plan.version !== 1) {
-    throw new Error("apply_bridge_plan only accepts version 1 plans produced by plan_journal_changes or plan_scene_changes.");
+    throw new Error("apply_bridge_plan only accepts version 1 plans produced by plan_journal_changes, plan_scene_changes, or plan_document_changes.");
   }
   if (!Array.isArray(plan.operations) || !plan.operations.length) {
     throw new Error("apply_bridge_plan requires at least one operation.");
@@ -1771,6 +1929,33 @@ async function applyScenePlanOperation(operation) {
   };
 }
 
+async function applyDocumentPlanOperation(operation) {
+  const documentName = normalizeDocumentPlanName(operation.target?.documentName);
+  const documentClass = getDocumentClass(documentName);
+  if (operation.type === "document.create") {
+    const created = await documentClass.create(operation.data ?? {});
+    return {
+      opId: operation.opId,
+      type: operation.type,
+      ok: true,
+      document: documentPlanPreview(created, documentName)
+    };
+  }
+
+  if (operation.type === "document.update") {
+    const document = resolveDocumentForPlan(documentName, { id: operation.target?.id });
+    const updated = await document.update(operation.data ?? {});
+    return {
+      opId: operation.opId,
+      type: operation.type,
+      ok: true,
+      document: documentPlanPreview(updated, documentName)
+    };
+  }
+
+  throw new Error(`Unsupported bridge plan operation: ${operation.type}`);
+}
+
 async function applyBridgePlan(args = {}) {
   const plan = args.plan;
   assertBridgePlanConfirmation(plan, args.confirmation ?? {});
@@ -1801,6 +1986,8 @@ async function applyBridgePlan(args = {}) {
       results.push({ opId: operation.opId, type: operation.type, ok: true, document: journalPagePreview(updated) });
     } else if (operation.type.startsWith("scene.")) {
       results.push(await applyScenePlanOperation(operation));
+    } else if (operation.type.startsWith("document.")) {
+      results.push(await applyDocumentPlanOperation(operation));
     } else {
       throw new Error(`Unsupported bridge plan operation: ${operation.type}`);
     }
@@ -2030,6 +2217,9 @@ async function handleBridgeRequest(method, args = {}) {
 
     case "plan_scene_changes":
       return planSceneChanges(args);
+
+    case "plan_document_changes":
+      return planDocumentChanges(args);
 
     case "apply_bridge_plan":
       return applyBridgePlan(args);
