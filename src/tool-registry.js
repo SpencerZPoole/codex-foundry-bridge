@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
-export const BRIDGE_VERSION = "0.2.7";
+export const BRIDGE_VERSION = "0.2.8";
 export const TOOL_REGISTRY_VERSION = 1;
 
 const AnyJson = z.any().optional();
@@ -197,6 +197,57 @@ export const TOOL_DEFINITIONS = [
     ...capabilityMetadata(CATEGORY.liveRead, "SceneSummary")
   },
   {
+    name: "summarize_world_index",
+    title: "Summarize world index",
+    description: "Return compact live-world counts, active scene state, users, compendium packs, runtime health, and optional samples.",
+    inputSchema: {
+      includeSamples: z.boolean().optional(),
+      sampleLimit: z.number().optional()
+    },
+    risk: "read",
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.liveRead, "WorldIndexSummary")
+  },
+  {
+    name: "search_world",
+    title: "Search world",
+    description: "Search across live world collections and return compact stable-id results.",
+    inputSchema: {
+      query: z.string(),
+      collections: z.array(z.string()).optional(),
+      limit: z.number().optional()
+    },
+    risk: "read",
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.liveRead, "WorldSearchResult[]")
+  },
+  {
+    name: "audit_scene_readiness",
+    title: "Audit scene readiness",
+    description: "Read-only scene readiness audit for assets, linked actors, token state, grid, background, and scene document counts.",
+    inputSchema: {
+      id: z.string().optional(),
+      includeTokens: z.boolean().optional(),
+      tokenLimit: z.number().optional()
+    },
+    risk: "read",
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.liveRead, "SceneReadinessAudit")
+  },
+  {
+    name: "audit_actor_readiness",
+    title: "Audit actor readiness",
+    description: "Read-only actor readiness audit for images, token linkage, ownership, item gaps, and D35E summary availability.",
+    inputSchema: {
+      id: z.string().optional(),
+      includeItems: z.boolean().optional(),
+      itemLimit: z.number().optional()
+    },
+    risk: "read",
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.liveRead, "ActorReadinessAudit")
+  },
+  {
     name: "list_users",
     title: "List users",
     description: "List Foundry users from the live world with sensitive fields redacted.",
@@ -241,6 +292,19 @@ export const TOOL_DEFINITIONS = [
     risk: "read",
     requiresTrustedSession: true,
     ...capabilityMetadata(CATEGORY.liveRead, "RuntimeEvent[]")
+  },
+  {
+    name: "get_runtime_timeline",
+    title: "Get runtime timeline",
+    description: "Read a bounded in-memory live-session timeline of runtime events, bridge requests, chat, scene, combat, and user activity.",
+    inputSchema: {
+      limit: z.number().optional(),
+      since: z.string().optional(),
+      type: z.string().optional()
+    },
+    risk: "read",
+    requiresTrustedSession: true,
+    ...capabilityMetadata(CATEGORY.liveRead, "RuntimeTimelineEvent[]")
   },
   {
     name: "clear_runtime_events",

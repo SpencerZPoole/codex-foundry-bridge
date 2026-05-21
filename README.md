@@ -71,6 +71,7 @@ Useful MCP/daemon tools:
 - `restart_foundry_world` fully restarts the local Foundry app, launches an explicit world, joins as GM, and verifies bridge readiness. It requires `dangerous=true` and local lifecycle credentials.
 - `list_compendium_packs`, `search_compendium`, and `get_compendium_document` read live Foundry compendium APIs without scraping pack storage.
 - `summarize_actor` and `summarize_scene` provide compact read-only D35E/world summaries.
+- `summarize_world_index`, `search_world`, `audit_scene_readiness`, `audit_actor_readiness`, and `get_runtime_timeline` provide higher-level read-only world intelligence through the live trusted GM session.
 
 ## Capability Manifest
 
@@ -84,6 +85,7 @@ Fallback examples:
 ```json
 { "method": "bridge_self_check" }
 { "method": "search_compendium", "args": { "pack": "D35E.spells", "query": "acid arrow", "limit": 5 } }
+{ "method": "summarize_world_index", "args": { "includeSamples": true, "sampleLimit": 3 } }
 ```
 
 The fallback is not a privilege bypass. High-risk tools still require their normal arguments and gates, such as `run_gm_script` requiring `dangerous=true` and a trusted GM session.

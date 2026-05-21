@@ -4,7 +4,7 @@ Last verified: 2026-05-21
 
 ## Summary
 
-`FoundryCodexBridge` is currently a strong local-only FoundryVTT control bridge, not just a proof of concept. Version `0.2.7` exposes a shared registry of 36 MCP/daemon tools, supports direct MCP discovery plus `call_bridge_tool` fallback dispatch, and adds a guarded local Foundry app lifecycle restart workflow for explicit worlds.
+`FoundryCodexBridge` is currently a strong local-only FoundryVTT control bridge, not just a proof of concept. Version `0.2.8` exposes a shared registry of 41 MCP/daemon tools, supports direct MCP discovery plus `call_bridge_tool` fallback dispatch, includes a guarded local Foundry app lifecycle restart workflow for explicit worlds, and adds high-level read-only live-world intelligence.
 
 The v1.0 release goal is **Guarded Power**: expand practical live-project ability substantially while preserving the current safety model: localhost daemon, bridge token, trusted GM session gate, redaction, backups before destructive edits, and explicit `dangerous=true` for raw GM script execution.
 
@@ -14,16 +14,16 @@ This document is the durable local roadmap. Keep it updated as v1.0 work lands.
 
 ### Verified State
 
-- Bridge/package/module version: `0.2.7`
+- Bridge/package/module version: `0.2.8`
 - Registry version: `1`
-- Registry checksum: `9aef8618dbcc034a1acef03cbfd3ffda4b0041325b7d75c5ff4931456204725e`
-- Registered tools: `36`
+- Registry checksum: `8d5f87740149976ed66b4b266fbdcafddb9880dd597dc9335ddbdb3b0929a996`
+- Registered tools: `41`
 - Live validation world: `scratch`
 - Live Foundry: `14.361`
 - Live system: `D35E 3.0.2`
-- Live bridge status: daemon verified at `0.2.7`; `bridge_self_check.ready=true`
-- Live module script version: `0.2.7`
-- Installed module manifest file version: `0.2.7`
+- Live bridge status: daemon verified at `0.2.8`; `bridge_self_check.ready=true`
+- Live module script version: `0.2.8`
+- Installed module manifest file version: `0.2.8`
 - Trusted GM sessions: `2` after visible Electron GM login plus managed bridge GM client restart validation
 - Runtime event health: no errors; only Foundry V1 Application deprecation warnings from compatibility UI paths
 - Current self-check action items: none
@@ -41,8 +41,9 @@ The bridge currently provides:
 | Live document reads | `list_collections`, `get_document`, `search_documents`, `list_scenes`, `inspect_scene` | Useful but generic |
 | Compendium reads | `list_compendium_packs`, `search_compendium`, `get_compendium_document` | Strong read-only baseline through live Foundry APIs |
 | Compact summaries | `summarize_actor`, `summarize_scene` | Useful D35E/world overview layer |
+| High-level read intelligence | `summarize_world_index`, `search_world`, `audit_scene_readiness`, `audit_actor_readiness`, `get_runtime_timeline` | Added in `0.2.8`; compact, read-only, trusted-session gated |
 | World/user/settings reads | `list_users`, `read_settings`, `export_world_snapshot` | Useful, redacted, still shallow |
-| Runtime diagnostics | `tail_logs`, `get_runtime_events`, `clear_runtime_events` | Good recent-event visibility, not a durable session timeline |
+| Runtime diagnostics | `tail_logs`, `get_runtime_events`, `get_runtime_timeline`, `clear_runtime_events` | Good bounded live-session visibility, not persisted to disk |
 | World mutation | `create_document`, `update_document`, `create_embedded_document`, `update_embedded_document` | Powerful but low-level |
 | Destructive mutation | `delete_document`, `delete_embedded_document` | Backup-first, still needs rollback browsing/apply metadata |
 | Chat/macros/scripts | `create_chat_message`, `run_macro`, `run_gm_script` | Powerful; `run_gm_script` remains emergency-only |
@@ -58,6 +59,7 @@ The bridge currently provides:
 - Redacts token-like and sensitive fields in normal outputs.
 - Creates local backups before destructive document and embedded-document deletes.
 - Captures live browser/runtime warnings, errors, UI notifications, and bridge request failures.
+- Provides compact world index, world search, scene readiness, actor readiness, and bounded runtime timeline reads through live Foundry APIs.
 - Can restart the local Foundry application and re-establish a bridge-ready GM client through Windows Credential Manager-backed lifecycle automation.
 - Has smoke coverage for MCP registration parity, dynamic trust gates, GM authorization, fallback dispatch, and revocation.
 
@@ -69,7 +71,7 @@ The bridge currently provides:
 - Complex arguments are still exposed with broad schemas in several places, which weakens MCP usability and makes client-side validation thin.
 - `call_bridge_tool.args` works as a daemon object payload, but direct MCP exposure can be awkward in clients that flatten object args.
 - Output is mostly free-form JSON text; important tools do not yet provide structured output schemas.
-- Runtime diagnostics are recent and bounded, not a durable session event timeline.
+- Runtime diagnostics and timeline are bounded in memory for the current live session, not persisted as a durable disk history.
 - There is no rollback browser, restore assistant, or transaction history viewer.
 - There are no permission/profile presets for different operating modes such as read-only, prep, session, maintenance, or dangerous-script-enabled.
 - Lifecycle restart now targets both visible Electron-window GM login and a managed bridge GM client, but this CDP path still needs live hardening across more Foundry/Electron versions.
@@ -137,21 +139,35 @@ Acceptance:
 
 ### Milestone 2: Safer High-Level Read Intelligence
 
+Status: completed for the `0.2.8` read-only development slice.
+
 Goal: give Codex a richer understanding of live worlds without requiring raw document spelunking.
 
 Deliverables:
 
-- `summarize_world_index`: compact counts and health summary for actors, items, scenes, journals, folders, macros, compendium packs, users, active scene, and runtime status.
-- `audit_scene_readiness`: read-only scene checks for missing assets, unlinked actors, hidden/unconfigured tokens, lights/walls/sounds/notes presence, grid/background data, and D35E-relevant token state.
-- `audit_actor_readiness`: read-only actor checks for missing images, empty inventories, unprepared or malformed D35E item data, broken embedded items, ownership, and token linkage.
-- `search_world`: cross-collection search with compact results and stable IDs.
-- `get_runtime_timeline`: durable session timeline built from runtime events, bridge requests, chat/message deltas, combat changes, and scene changes where available.
+- Completed: `summarize_world_index` returns compact live counts and health summary for world collections, users, active scene, compendium packs, samples, and runtime status.
+- Completed: `audit_scene_readiness` performs read-only scene checks for missing background assets, unlinked or missing actor tokens, hidden tokens, grid/background state, and scene document counts.
+- Completed: `audit_actor_readiness` performs read-only actor checks for images, inventories, embedded item gaps, ownership, D35E summary availability, and token linkage.
+- Completed: `search_world` searches live world collections with compact stable-id results, folder names, UUIDs, and matched field names.
+- Completed: `get_runtime_timeline` returns a bounded in-memory live-session timeline from runtime events, bridge requests, scene, chat, combat, and user hooks where available.
 
 Acceptance:
 
-- All new read tools require trusted GM session, except pure daemon diagnostics.
-- Results are compact by default and redacted.
-- Live validation runs only on `scratch`.
+- Completed: all five new tools require a trusted GM session and remain fallback-callable through `call_bridge_tool`.
+- Completed: results are compact by default and pass through existing redaction.
+- Completed: manifest/MCP/smoke tests cover metadata, direct exposure, fallback dispatch, and trust-gate refusal.
+- Completed: live validation ran only on `scratch`.
+
+Live findings from the `scratch` validation pass:
+
+- Confirmed `bridge_self_check.ready=true`, active daemon world `scratch`, Foundry `14.361`, D35E `3.0.2`, module/script/manifest version `0.2.8`, and registry checksum `8d5f87740149976ed66b4b266fbdcafddb9880dd597dc9335ddbdb3b0929a996`.
+- Confirmed `list_bridge_tools` exposes 41 tools and marks all five high-level read tools as category `live-read`, risk `read`, direct MCP exposed, trusted-session required, and fallback-callable.
+- Confirmed `summarize_world_index({ includeSamples: true, sampleLimit: 3 })` returned world `scratch`, 1 actor, 1 scene, active scene `scratch`, 37 compendium packs, and runtime timeline status.
+- Confirmed `search_world({ query: "Black Dragon", limit: 10 })` returned actor `Black Dragon, Ancient` with stable id `jPwFpRova3PUJju7` and UUID `Actor.jPwFpRova3PUJju7`.
+- Confirmed `audit_scene_readiness({ includeTokens: true, tokenLimit: 5 })` returned the active `scratch` scene and correctly flagged one warning: `missing-background`.
+- Confirmed `audit_actor_readiness({ includeItems: true, itemLimit: 5 })` returned actor `Black Dragon, Ancient`, ready `true`, 0 issues, and 1 token link.
+- Confirmed `get_runtime_timeline({ limit: 10 })` returned 10 bounded live-session events.
+- Confirmed `call_bridge_tool -> summarize_world_index` returned world `scratch` and 14 collection entries through fallback dispatch.
 
 ### Milestone 3: Previewable Write Workflows
 
@@ -255,6 +271,12 @@ For live checks, use `scratch` unless explicitly redirected:
 { "method": "restart_foundry_world", "args": { "worldId": "scratch", "dangerous": true } }
 { "method": "search_compendium", "args": { "pack": "D35E.spells", "query": "acid arrow", "limit": 5 } }
 { "method": "summarize_scene", "args": { "includeTokens": true, "tokenLimit": 5 } }
+{ "method": "summarize_world_index", "args": { "includeSamples": true, "sampleLimit": 3 } }
+{ "method": "search_world", "args": { "query": "Black Dragon", "limit": 10 } }
+{ "method": "audit_scene_readiness", "args": { "includeTokens": true, "tokenLimit": 5 } }
+{ "method": "audit_actor_readiness", "args": { "includeItems": true, "itemLimit": 5 } }
+{ "method": "get_runtime_timeline", "args": { "limit": 10 } }
+{ "method": "call_bridge_tool", "args": { "method": "summarize_world_index", "args": { "includeSamples": false } } }
 ```
 
 ## Deferred Decisions
@@ -264,7 +286,7 @@ These are intentionally not decided in this roadmap and should be resolved immed
 - Whether v1.0 should introduce a separate `permissions.json` profile system or encode profiles in the trusted-world record.
 - Whether transaction plans should be stored on disk, in memory, or both.
 - Whether rollback should be automated for all supported operations or only assisted through backups and before/after metadata.
-- Which high-level GM workflow should be implemented first after manifest hardening. Current best first candidate: read-only world/scene readiness audits, followed by previewable journal/page updates.
+- Which high-level GM workflow should be implemented first after the completed read-only intelligence slice. Current best first candidate: previewable journal/page updates, followed by scene/token prep helpers.
 
 ## Non-Goals
 

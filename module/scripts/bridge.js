@@ -1,12 +1,14 @@
 const MODULE_ID = "codex-foundry-bridge";
-const MODULE_VERSION = "0.2.7";
+const MODULE_VERSION = "0.2.8";
 const DEFAULT_URL = "ws://127.0.0.1:30123/foundry";
 const RECONNECT_MS = 5000;
 const MAX_RESULT_CHARS = 1_000_000;
 const MAX_RUNTIME_EVENTS = 250;
+const MAX_TIMELINE_EVENTS = 500;
 const RUNTIME_CAPTURE_FLAG = "__codexFoundryBridgeRuntimeCaptureInstalled";
 const CONSOLE_PATCH_FLAG = "__codexFoundryBridgeConsolePatched";
 const NOTIFICATION_PATCH_FLAG = "__codexFoundryBridgeNotificationsPatched";
+const TIMELINE_HOOK_FLAG = "__codexFoundryBridgeTimelineHooksInstalled";
 const SENSITIVE_FIELD_PATTERN = /password|secret|license|adminPassword|adminKey|apiKey|privateKey|hash|salt|accessToken|refreshToken|bearerToken|bridgeToken/i;
 const COLLECTION_KEYS_BY_DOCUMENT_NAME = {
   Actor: "actors",
@@ -29,8 +31,10 @@ let socket = null;
 let reconnectTimer = null;
 let requestCounter = 0;
 let runtimeEventCounter = 0;
+let timelineEventCounter = 0;
 const pending = new Map();
 let runtimeEvents = [];
+let timelineEvents = [];
 let authorizationStatus = { trusted: null, world: null, trustedWorlds: [] };
 let authorizationPromptOpen = false;
 let authorizationPromptDismissedForWorld = null;
@@ -126,6 +130,31 @@ function runtimeMessageFromValues(values = []) {
   }).filter(Boolean).join(" "));
 }
 
+function recordTimelineEvent(type, details = {}) {
+  const event = redact({
+    id: ++timelineEventCounter,
+    timestamp: new Date().toISOString(),
+    type,
+    ...details
+  });
+  timelineEvents.push(event);
+  if (timelineEvents.length > MAX_TIMELINE_EVENTS) {
+    timelineEvents = timelineEvents.slice(-MAX_TIMELINE_EVENTS);
+  }
+  return event;
+}
+
+function getRuntimeTimeline({ limit = 50, since = null, type = null } = {}) {
+  const max = boundedLimit(limit, 50, MAX_TIMELINE_EVENTS);
+  const minTime = since ? Date.parse(since) : null;
+  let events = timelineEvents;
+  if (type) events = events.filter((event) => event.type === type);
+  if (Number.isFinite(minTime)) {
+    events = events.filter((event) => Date.parse(event.timestamp) >= minTime);
+  }
+  return events.slice(-max);
+}
+
 function recordRuntimeEvent(level, source, details = {}) {
   const args = Array.isArray(details.args) ? details.args : [];
   const message = details.message ?? runtimeMessageFromValues(args);
@@ -144,6 +173,13 @@ function recordRuntimeEvent(level, source, details = {}) {
   if (runtimeEvents.length > MAX_RUNTIME_EVENTS) {
     runtimeEvents = runtimeEvents.slice(-MAX_RUNTIME_EVENTS);
   }
+  recordTimelineEvent("runtime", {
+    runtimeEventId: event.id,
+    level: event.level,
+    source: event.source,
+    method: event.method,
+    message: event.message
+  });
   return event;
 }
 
@@ -252,6 +288,73 @@ function installRuntimeCapture() {
     consoleCapture: Boolean(globalThis[CONSOLE_PATCH_FLAG]),
     notificationCapture: Boolean(globalThis.ui?.notifications?.[NOTIFICATION_PATCH_FLAG])
   };
+}
+
+function compactDocumentReference(document) {
+  if (!document) return null;
+  return redact({
+    id: document.id ?? document._id ?? null,
+    uuid: document.uuid ?? null,
+    name: document.name ?? document.title ?? null,
+    type: document.type ?? document.documentName ?? document.constructor?.name ?? null
+  });
+}
+
+function installTimelineHooks() {
+  if (globalThis[TIMELINE_HOOK_FLAG]) return { installed: true, firstInstall: false };
+  const safeHook = (hookName, handler) => {
+    Hooks.on(hookName, (...args) => {
+      try {
+        handler(...args);
+      } catch {
+        // Timeline capture is observational only.
+      }
+    });
+  };
+
+  safeHook("canvasReady", (canvasInstance) => {
+    const scene = canvasInstance?.scene ?? canvas?.scene;
+    recordTimelineEvent("scene", {
+      action: "canvasReady",
+      scene: compactDocumentReference(scene)
+    });
+  });
+  safeHook("createChatMessage", (message) => {
+    recordTimelineEvent("chat", {
+      action: "create",
+      message: compactDocumentReference(message),
+      speaker: message.speaker?.alias ?? null,
+      whisperCount: Array.isArray(message.whisper) ? message.whisper.length : 0,
+      blind: message.blind === true
+    });
+  });
+  safeHook("createCombat", (combat) => {
+    recordTimelineEvent("combat", { action: "create", combat: compactDocumentReference(combat) });
+  });
+  safeHook("updateCombat", (combat, changes) => {
+    recordTimelineEvent("combat", {
+      action: "update",
+      combat: compactDocumentReference(combat),
+      changedKeys: Object.keys(changes ?? {}).sort()
+    });
+  });
+  safeHook("deleteCombat", (combat) => {
+    recordTimelineEvent("combat", { action: "delete", combat: compactDocumentReference(combat) });
+  });
+  safeHook("userConnected", (user, connected) => {
+    recordTimelineEvent("user", {
+      action: connected ? "connected" : "disconnected",
+      user: user ? { id: user.id, name: user.name, role: user.role, isGM: user.isGM } : null
+    });
+  });
+
+  globalThis[TIMELINE_HOOK_FLAG] = true;
+  recordTimelineEvent("bridge", {
+    action: "timeline-hooks-ready",
+    world: { id: game.world?.id, title: game.world?.title },
+    user: game.user ? { id: game.user.id, name: game.user.name, role: game.user.role, isGM: game.user.isGM } : null
+  });
+  return { installed: true, firstInstall: true };
 }
 
 function toPlainDocument(document, { includeEmbedded = false } = {}) {
@@ -608,6 +711,275 @@ function summarizeDocument(document, options = {}) {
   };
 }
 
+function folderNameForDocument(document) {
+  if (!document?.folder) return null;
+  if (typeof document.folder === "string") return game.folders?.get(document.folder)?.name ?? document.folder;
+  return document.folder.name ?? document.folder.id ?? null;
+}
+
+function documentSearchFields(document) {
+  const plain = document.toObject ? document.toObject() : document;
+  return redact({
+    id: document.id ?? plain._id,
+    uuid: document.uuid ?? null,
+    name: document.name ?? plain.name ?? plain.title,
+    type: plain.type ?? document.type ?? document.documentName,
+    documentName: document.documentName,
+    folder: folderNameForDocument(document),
+    img: plain.img ?? document.img ?? null,
+    description: stripHtml(plain.system?.description?.value ?? plain.content ?? plain.description ?? "")
+  });
+}
+
+function summarizeDocumentForSearch(document, collectionKeyValue, matchedFields = []) {
+  const fields = documentSearchFields(document);
+  return redact({
+    collection: collectionKeyValue,
+    documentName: fields.documentName,
+    id: fields.id,
+    uuid: fields.uuid,
+    name: fields.name,
+    type: fields.type,
+    folder: fields.folder,
+    img: fields.img,
+    matchedFields
+  });
+}
+
+function sampleCollection(collectionKeyValue, collection, limit) {
+  return Array.from(collection.values ? collection.values() : collection)
+    .slice(0, limit)
+    .map((document) => summarizeDocumentForSearch(document, collectionKeyValue));
+}
+
+function summarizeWorldIndex(args = {}) {
+  const includeSamples = args.includeSamples === true;
+  const sampleLimit = boundedLimit(args.sampleLimit, 3, 10);
+  const collections = collectionEntries();
+  const samples = {};
+
+  if (includeSamples) {
+    for (const [key, collection] of iterCollections()) {
+      samples[key] = sampleCollection(key, collection, sampleLimit);
+    }
+  }
+
+  const packs = Array.from(game.packs.values()).map(packSummary);
+  const activeScene = canvas?.scene ?? game.scenes?.active ?? null;
+
+  return redact({
+    world: { id: game.world.id, title: game.world.title },
+    system: { id: game.system.id, title: game.system.title, version: game.system.version },
+    foundry: { version: game.version, release: game.release },
+    activeScene: activeScene ? summarizeSceneDocument(activeScene, { includeTokens: false }) : null,
+    collections,
+    users: game.users.map((user) => ({
+      id: user.id,
+      name: user.name,
+      role: user.role,
+      active: user.active,
+      isGM: user.isGM,
+      character: user.character?.id ?? user.character ?? null
+    })),
+    compendiumPacks: {
+      count: packs.length,
+      byDocumentName: packs.reduce((acc, pack) => {
+        const key = pack.documentName ?? "unknown";
+        acc[key] = (acc[key] ?? 0) + 1;
+        return acc;
+      }, {}),
+      samples: packs.slice(0, sampleLimit)
+    },
+    runtime: {
+      events: runtimeEventSummary(),
+      timelineStored: timelineEvents.length,
+      timelineMaxStored: MAX_TIMELINE_EVENTS
+    },
+    samples: includeSamples ? samples : undefined
+  });
+}
+
+function searchWorld(args = {}) {
+  const query = String(args.query ?? "").trim().toLowerCase();
+  if (!query) throw new Error("search_world requires a non-empty query.");
+  const limit = boundedLimit(args.limit, 25, 100);
+  const requestedCollections = Array.isArray(args.collections)
+    ? new Set(args.collections.map((entry) => String(entry).toLowerCase()))
+    : null;
+  const results = [];
+
+  for (const [key, collection] of iterCollections()) {
+    const collectionDocumentName = String(collection.documentName ?? "").toLowerCase();
+    if (requestedCollections && !requestedCollections.has(key.toLowerCase()) && !requestedCollections.has(collectionDocumentName)) continue;
+
+    for (const document of collection.values()) {
+      const fields = documentSearchFields(document);
+      const matchedFields = [];
+      for (const [field, value] of Object.entries(fields)) {
+        if (value == null) continue;
+        const text = typeof value === "string" ? value : JSON.stringify(value);
+        if (text.toLowerCase().includes(query)) matchedFields.push(field);
+      }
+      if (!matchedFields.length) continue;
+      results.push(summarizeDocumentForSearch(document, key, matchedFields));
+      if (results.length >= limit) return results;
+    }
+  }
+
+  return results;
+}
+
+function sceneDocumentArray(scene, key) {
+  const collection = scene?.[key];
+  if (!collection) return [];
+  if (collection.values) return Array.from(collection.values());
+  if (Array.isArray(collection)) return collection;
+  return [];
+}
+
+function tokenAuditSummary(token) {
+  const actor = token.actor ?? (token.actorId ? game.actors.get(token.actorId) : null);
+  const issues = [];
+  const image = token.texture?.src ?? token.img ?? null;
+  if (!image) issues.push("missing-token-image");
+  if (!token.actorId) issues.push("unlinked-token");
+  if (token.actorId && !actor) issues.push("missing-linked-actor");
+  if (token.hidden) issues.push("hidden-token");
+  return redact({
+    id: token.id,
+    name: token.name,
+    actorId: token.actorId ?? null,
+    actorName: actor?.name ?? null,
+    img: image,
+    hidden: token.hidden === true,
+    x: token.x,
+    y: token.y,
+    elevation: token.elevation,
+    disposition: token.disposition,
+    issues
+  });
+}
+
+function auditSceneReadiness(args = {}) {
+  const scene = args.id ? game.scenes.get(args.id) : canvas?.scene;
+  if (!scene) throw new Error("Scene not found");
+  const tokens = sceneDocumentArray(scene, "tokens");
+  const tokenSummaries = tokens.map(tokenAuditSummary);
+  const issues = [];
+  const background = scene.background?.src ?? scene.img ?? null;
+  if (!background) issues.push({ level: "warn", code: "missing-background", message: "Scene has no background image." });
+  if (!scene.grid) issues.push({ level: "warn", code: "missing-grid", message: "Scene grid metadata is missing." });
+  for (const token of tokenSummaries) {
+    for (const issue of token.issues) {
+      issues.push({ level: issue === "hidden-token" ? "info" : "warn", code: issue, tokenId: token.id, tokenName: token.name });
+    }
+  }
+
+  const limit = boundedLimit(args.tokenLimit, 25, 200);
+  return redact({
+    scene: summarizeSceneDocument(scene, { includeTokens: false }),
+    ready: !issues.some((issue) => issue.level === "error" || issue.level === "warn"),
+    issues,
+    counts: {
+      tokens: tokens.length,
+      walls: sceneDocumentArray(scene, "walls").length,
+      lights: sceneDocumentArray(scene, "lights").length,
+      sounds: sceneDocumentArray(scene, "sounds").length,
+      tiles: sceneDocumentArray(scene, "tiles").length,
+      drawings: sceneDocumentArray(scene, "drawings").length,
+      notes: sceneDocumentArray(scene, "notes").length
+    },
+    grid: scene.grid,
+    background,
+    tokens: args.includeTokens === true ? tokenSummaries.slice(0, limit) : undefined
+  });
+}
+
+function resolveActorForAudit(id) {
+  if (id) return getDocument("actors", id);
+  if (game.user?.character) return game.user.character;
+  const actors = Array.from(game.actors.values());
+  if (actors.length === 1) return actors[0];
+  throw new Error("audit_actor_readiness requires id when there is no current user character or single world actor.");
+}
+
+function actorTokenLinks(actor) {
+  const links = [];
+  for (const scene of game.scenes.values()) {
+    for (const token of sceneDocumentArray(scene, "tokens")) {
+      if (token.actorId !== actor.id) continue;
+      links.push({
+        sceneId: scene.id,
+        sceneName: scene.name,
+        tokenId: token.id,
+        tokenName: token.name,
+        hidden: token.hidden === true
+      });
+    }
+  }
+  return links;
+}
+
+function ownershipSummary(document) {
+  const ownership = document.ownership ?? {};
+  return Object.entries(ownership).map(([userId, level]) => ({
+    userId,
+    userName: userId === "default" ? "default" : game.users.get(userId)?.name ?? null,
+    level
+  }));
+}
+
+function auditActorReadiness(args = {}) {
+  const actor = resolveActorForAudit(args.id);
+  const items = actor.items ? Array.from(actor.items.values()) : [];
+  const links = actorTokenLinks(actor);
+  const issues = [];
+  if (!actor.img) issues.push({ level: "warn", code: "missing-actor-image", message: "Actor has no image." });
+  if (!links.length) issues.push({ level: "info", code: "no-scene-token", message: "Actor is not currently linked to a scene token." });
+  if (!items.length) issues.push({ level: "info", code: "empty-inventory", message: "Actor has no embedded items." });
+
+  const itemIssues = [];
+  for (const item of items) {
+    const itemIssueCodes = [];
+    if (!item.img) itemIssueCodes.push("missing-item-image");
+    if (!item.system) itemIssueCodes.push("missing-item-system");
+    if (!item.name) itemIssueCodes.push("missing-item-name");
+    if (itemIssueCodes.length) {
+      itemIssues.push({
+        id: item.id,
+        name: item.name,
+        type: item.type,
+        issues: itemIssueCodes
+      });
+    }
+  }
+  if (itemIssues.length) issues.push({ level: "warn", code: "embedded-item-gaps", count: itemIssues.length });
+
+  const d35eSummary = {
+    hasHp: actor.system?.attributes?.hp != null,
+    hasAc: actor.system?.attributes?.ac != null,
+    hasAbilities: actor.system?.abilities != null,
+    classCount: classSummary(actor).length
+  };
+  if (!d35eSummary.hasHp || !d35eSummary.hasAc || !d35eSummary.hasAbilities) {
+    issues.push({ level: "warn", code: "incomplete-d35e-summary", d35eSummary });
+  }
+
+  const limit = boundedLimit(args.itemLimit, 20, 100);
+  return redact({
+    actor: summarizeActorDocument(actor, {
+      includeItems: args.includeItems === true,
+      itemLimit: limit
+    }),
+    ready: !issues.some((issue) => issue.level === "error" || issue.level === "warn"),
+    issues,
+    ownership: ownershipSummary(actor),
+    tokenLinks: links,
+    itemIssues: itemIssues.slice(0, limit),
+    d35eSummary
+  });
+}
+
 function safeEvalScript(source, context = {}) {
   const asyncFunction = Object.getPrototypeOf(async function () {}).constructor;
   return asyncFunction(
@@ -654,7 +1026,12 @@ function bridgeDiagnostics() {
     credentialConfigured: Boolean(credential),
     urlConfigured: Boolean(url),
     socketState: socketStateName(),
-    runtimeEvents: runtimeEventSummary()
+    runtimeEvents: runtimeEventSummary(),
+    runtimeTimeline: {
+      stored: timelineEvents.length,
+      maxStored: MAX_TIMELINE_EVENTS,
+      recent: timelineEvents.slice(-5)
+    }
   };
 }
 
@@ -756,6 +1133,18 @@ async function handleBridgeRequest(method, args = {}) {
       });
     }
 
+    case "summarize_world_index":
+      return summarizeWorldIndex(args);
+
+    case "search_world":
+      return searchWorld(args);
+
+    case "audit_scene_readiness":
+      return auditSceneReadiness(args);
+
+    case "audit_actor_readiness":
+      return auditActorReadiness(args);
+
     case "list_users":
       return game.users.map((user) => redact({
         id: user.id,
@@ -793,6 +1182,9 @@ async function handleBridgeRequest(method, args = {}) {
 
     case "get_runtime_events":
       return getRuntimeEvents(args);
+
+    case "get_runtime_timeline":
+      return getRuntimeTimeline(args);
 
     case "clear_runtime_events":
       return clearRuntimeEvents();
@@ -1208,7 +1600,19 @@ function connect() {
 
     if (payload.type !== "request") return;
 
+    recordTimelineEvent("bridge-request", {
+      action: "received",
+      requestId: payload.id,
+      method: payload.method
+    });
+
     if (authorizationStatus.trusted !== true) {
+      recordTimelineEvent("bridge-request", {
+        action: "refused",
+        requestId: payload.id,
+        method: payload.method,
+        reason: "world-not-authorized"
+      });
       send({
         type: "response",
         id: payload.id,
@@ -1220,12 +1624,25 @@ function connect() {
 
     try {
       const result = await handleBridgeRequest(payload.method, payload.args ?? {});
+      recordTimelineEvent("bridge-request", {
+        action: "completed",
+        requestId: payload.id,
+        method: payload.method,
+        ok: true
+      });
       send({ type: "response", id: payload.id, ok: true, result: redact(result) });
     } catch (error) {
       recordRuntimeEvent("error", "bridge-request", {
         method: payload.method,
         message: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined
+      });
+      recordTimelineEvent("bridge-request", {
+        action: "completed",
+        requestId: payload.id,
+        method: payload.method,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error)
       });
       send({
         type: "response",
@@ -1295,6 +1712,7 @@ Hooks.once("init", () => {
 
 Hooks.once("ready", () => {
   patchNotificationCapture();
+  installTimelineHooks();
   globalThis.CodexFoundryBridge = {
     connect,
     setToken,
@@ -1305,7 +1723,9 @@ Hooks.once("ready", () => {
     request: async (method, args) => handleBridgeRequest(method, args),
     openLifecycleSetup: openLifecycleSetupWizard,
     getRuntimeEvents,
+    getRuntimeTimeline,
     clearRuntimeEvents,
+    installTimelineHooks,
     installRuntimeCapture
   };
   connect();

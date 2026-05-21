@@ -692,9 +692,14 @@ async function executeTool(method, args = {}) {
     case "get_compendium_document":
     case "summarize_actor":
     case "summarize_scene":
+    case "summarize_world_index":
+    case "search_world":
+    case "audit_scene_readiness":
+    case "audit_actor_readiness":
     case "list_users":
     case "read_settings":
     case "get_runtime_events":
+    case "get_runtime_timeline":
     case "clear_runtime_events":
     case "create_document":
     case "update_document":

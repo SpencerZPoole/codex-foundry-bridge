@@ -1,8 +1,8 @@
 {
-  "bridgeVersion": "0.2.7",
+  "bridgeVersion": "0.2.8",
   "registryVersion": 1,
-  "checksum": "9aef8618dbcc034a1acef03cbfd3ffda4b0041325b7d75c5ff4931456204725e",
-  "toolCount": 36,
+  "checksum": "8d5f87740149976ed66b4b266fbdcafddb9880dd597dc9335ddbdb3b0929a996",
+  "toolCount": 41,
   "fallback": {
     "tool": "call_bridge_tool",
     "note": "Use call_bridge_tool when direct MCP discovery lags; the target tool's normal safety gates still apply."
@@ -228,6 +228,73 @@
       ]
     },
     {
+      "name": "summarize_world_index",
+      "title": "Summarize world index",
+      "description": "Return compact live-world counts, active scene state, users, compendium packs, runtime health, and optional samples.",
+      "category": "live-read",
+      "outputShape": "WorldIndexSummary",
+      "risk": "read",
+      "readOnly": true,
+      "requiresTrustedSession": true,
+      "directMcpExposure": true,
+      "fallbackCallable": true,
+      "inputKeys": [
+        "includeSamples",
+        "sampleLimit"
+      ]
+    },
+    {
+      "name": "search_world",
+      "title": "Search world",
+      "description": "Search across live world collections and return compact stable-id results.",
+      "category": "live-read",
+      "outputShape": "WorldSearchResult[]",
+      "risk": "read",
+      "readOnly": true,
+      "requiresTrustedSession": true,
+      "directMcpExposure": true,
+      "fallbackCallable": true,
+      "inputKeys": [
+        "collections",
+        "limit",
+        "query"
+      ]
+    },
+    {
+      "name": "audit_scene_readiness",
+      "title": "Audit scene readiness",
+      "description": "Read-only scene readiness audit for assets, linked actors, token state, grid, background, and scene document counts.",
+      "category": "live-read",
+      "outputShape": "SceneReadinessAudit",
+      "risk": "read",
+      "readOnly": true,
+      "requiresTrustedSession": true,
+      "directMcpExposure": true,
+      "fallbackCallable": true,
+      "inputKeys": [
+        "id",
+        "includeTokens",
+        "tokenLimit"
+      ]
+    },
+    {
+      "name": "audit_actor_readiness",
+      "title": "Audit actor readiness",
+      "description": "Read-only actor readiness audit for images, token linkage, ownership, item gaps, and D35E summary availability.",
+      "category": "live-read",
+      "outputShape": "ActorReadinessAudit",
+      "risk": "read",
+      "readOnly": true,
+      "requiresTrustedSession": true,
+      "directMcpExposure": true,
+      "fallbackCallable": true,
+      "inputKeys": [
+        "id",
+        "includeItems",
+        "itemLimit"
+      ]
+    },
+    {
       "name": "list_users",
       "title": "List users",
       "description": "List Foundry users from the live world with sensitive fields redacted.",
@@ -287,6 +354,23 @@
         "limit",
         "since",
         "source"
+      ]
+    },
+    {
+      "name": "get_runtime_timeline",
+      "title": "Get runtime timeline",
+      "description": "Read a bounded in-memory live-session timeline of runtime events, bridge requests, chat, scene, combat, and user activity.",
+      "category": "live-read",
+      "outputShape": "RuntimeTimelineEvent[]",
+      "risk": "read",
+      "readOnly": true,
+      "requiresTrustedSession": true,
+      "directMcpExposure": true,
+      "fallbackCallable": true,
+      "inputKeys": [
+        "limit",
+        "since",
+        "type"
       ]
     },
     {

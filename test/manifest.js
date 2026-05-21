@@ -18,6 +18,13 @@ const manifestPath = path.join(projectRoot, "docs", "bridge-capabilities.json");
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 const generatedManifest = buildCapabilityManifest();
 const toolNames = TOOL_DEFINITIONS.map((tool) => tool.name);
+const highLevelReadTools = [
+  "summarize_world_index",
+  "search_world",
+  "audit_scene_readiness",
+  "audit_actor_readiness",
+  "get_runtime_timeline"
+];
 
 assert.deepEqual(manifest, generatedManifest);
 assert.equal(manifest.bridgeVersion, BRIDGE_VERSION);
@@ -56,6 +63,17 @@ const fallbackTool = manifest.tools.find((tool) => tool.name === "call_bridge_to
 assert.equal(fallbackTool.fallbackCallable, false);
 for (const tool of manifest.tools.filter((entry) => entry.name !== "call_bridge_tool")) {
   assert.equal(tool.fallbackCallable, true, `${tool.name} should be fallback-callable`);
+}
+
+for (const name of highLevelReadTools) {
+  const tool = manifest.tools.find((entry) => entry.name === name);
+  assert.ok(tool, `Manifest missing high-level read tool: ${name}`);
+  assert.equal(tool.category, "live-read", `${name} category`);
+  assert.equal(tool.risk, "read", `${name} risk`);
+  assert.equal(tool.readOnly, true, `${name} readOnly`);
+  assert.equal(tool.requiresTrustedSession, true, `${name} trusted session gate`);
+  assert.equal(tool.directMcpExposure, true, `${name} direct MCP exposure`);
+  assert.equal(tool.fallbackCallable, true, `${name} fallback callable`);
 }
 
 const client = new Client({ name: "foundry-codex-bridge-manifest", version: "0.0.0" });

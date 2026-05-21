@@ -19,6 +19,13 @@ const foundryDataDir = path.join(tempRoot, "FoundryVTT");
 const trustedWorldsPath = path.join(configDir, "trusted-worlds.json");
 const dynamicWorldId = "dynamic-smoke-world";
 const registeredToolNames = TOOL_DEFINITIONS.map((tool) => tool.name);
+const highLevelReadTools = [
+  "summarize_world_index",
+  "search_world",
+  "audit_scene_readiness",
+  "audit_actor_readiness",
+  "get_runtime_timeline"
+];
 
 fs.mkdirSync(path.join(foundryDataDir, "Data", "worlds", dynamicWorldId), { recursive: true });
 fs.mkdirSync(path.join(foundryDataDir, "Config"), { recursive: true });
@@ -27,6 +34,9 @@ assert.equal(new Set(registeredToolNames).size, registeredToolNames.length);
 assert.ok(registeredToolNames.includes("bridge_self_check"));
 assert.ok(registeredToolNames.includes("call_bridge_tool"));
 assert.ok(registeredToolNames.includes("list_compendium_packs"));
+for (const method of highLevelReadTools) {
+  assert.ok(registeredToolNames.includes(method), `${method} should be registered`);
+}
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -145,6 +155,13 @@ try {
   );
   assert.equal(toolsCall.body.result.tools.find((tool) => tool.name === "create_document").risk, "write");
   assert.equal(toolsCall.body.result.tools.find((tool) => tool.name === "list_compendium_packs").readOnly, true);
+  for (const method of highLevelReadTools) {
+    const tool = toolsCall.body.result.tools.find((entry) => entry.name === method);
+    assert.equal(tool.readOnly, true, `${method} should be read-only`);
+    assert.equal(tool.requiresTrustedSession, true, `${method} should require a trusted session`);
+    assert.equal(tool.directMcpExposure, true, `${method} should be directly exposed through MCP`);
+    assert.equal(tool.fallbackCallable, true, `${method} should be fallback-callable`);
+  }
   assert.equal(toolsCall.body.result.fallback.tool, "call_bridge_tool");
 
   const toolsViaFallback = await callBridge("call_bridge_tool", {
@@ -264,6 +281,19 @@ try {
   assert.equal(refusedReadIntelligence.response.status, 500);
   assert.match(refusedReadIntelligence.body.error, /trusted GM Foundry bridge session/);
 
+  for (const method of highLevelReadTools) {
+    const refusedHighLevelRead = await callBridge(method, { query: "smoke" }, { expectOk: false });
+    assert.equal(refusedHighLevelRead.response.status, 500, `${method} should fail before trust`);
+    assert.match(refusedHighLevelRead.body.error, /trusted GM Foundry bridge session/);
+
+    const refusedFallbackHighLevelRead = await callBridge("call_bridge_tool", {
+      method,
+      args: { query: "smoke" }
+    }, { expectOk: false });
+    assert.equal(refusedFallbackHighLevelRead.response.status, 500, `${method} fallback should fail before trust`);
+    assert.match(refusedFallbackHighLevelRead.body.error, /trusted GM Foundry bridge session/);
+  }
+
   const refusedFallbackLiveTool = await callBridge("call_bridge_tool", {
     method: "list_collections"
   }, { expectOk: false });
@@ -331,6 +361,14 @@ try {
       method,
       args: { pack: "D35E.spells", id: "acid arrow" }
     });
+    assert.equal(fallbackCall.body.result.method, method);
+  }
+
+  for (const method of highLevelReadTools) {
+    const args = method === "search_world" ? { query: "smoke" } : {};
+    const call = await callBridge(method, args);
+    assert.equal(call.body.result.method, method);
+    const fallbackCall = await callBridge("call_bridge_tool", { method, args });
     assert.equal(fallbackCall.body.result.method, method);
   }
 
