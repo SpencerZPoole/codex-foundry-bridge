@@ -9,7 +9,14 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_FOUNDRY_URL = "http://127.0.0.1:30000";
 const DEFAULT_FOUNDRY_EXECUTABLE = "C:\\Program Files\\Foundry Virtual Tabletop\\Foundry Virtual Tabletop.exe";
 const DEFAULT_ADMIN_CREDENTIAL_TARGET = "FoundryCodexBridge/AdminPassword";
-const DEFAULT_CDP_PORT = 39223;
+const DEFAULT_BRIDGE_CDP_PORT = 39223;
+const DEFAULT_VISIBLE_CDP_PORT = 39224;
+const GM_CLIENT_VIEWPORT = {
+  width: 1280,
+  height: 900,
+  deviceScaleFactor: 1,
+  mobile: false
+};
 const DEFAULT_TIMEOUTS = {
   stopGraceMs: 15000,
   stopForceMs: 10000,
@@ -99,12 +106,17 @@ function resolveLifecycleConfig(args, context) {
     bridgeStatusUrl: `http://${context.bridgeHost}:${context.bridgePort}/status`,
     bridgeUrl: `ws://${context.bridgeHost}:${context.bridgePort}/foundry`,
     bridgeToken: context.bridgeToken,
-    cdpPort: Number(args.cdpPort ?? fileConfig.cdpPort ?? DEFAULT_CDP_PORT),
+    cdpPort: Number(args.bridgeCdpPort ?? args.cdpPort ?? fileConfig.bridgeCdpPort ?? fileConfig.cdpPort ?? DEFAULT_BRIDGE_CDP_PORT),
+    bridgeCdpPort: Number(args.bridgeCdpPort ?? args.cdpPort ?? fileConfig.bridgeCdpPort ?? fileConfig.cdpPort ?? DEFAULT_BRIDGE_CDP_PORT),
+    visibleCdpPort: Number(args.visibleCdpPort ?? fileConfig.visibleCdpPort ?? DEFAULT_VISIBLE_CDP_PORT),
+    loginVisibleApp: args.loginVisibleApp ?? fileConfig.loginVisibleApp ?? true,
+    allowHeadlessOnlyFallback: Boolean(args.allowHeadlessOnlyFallback ?? fileConfig.allowHeadlessOnlyFallback),
     browserExecutable,
     browserProfile,
-    adminCredentialTarget: fileConfig.credentials?.adminTarget ?? DEFAULT_ADMIN_CREDENTIAL_TARGET,
+    adminCredentialTarget: args.adminCredentialTarget ?? fileConfig.credentials?.adminTarget ?? DEFAULT_ADMIN_CREDENTIAL_TARGET,
     gmUserId: args.gmUserId ?? worldConfig.gmUserId ?? fileConfig.gmUserId ?? null,
-    gmCredentialTarget: worldConfig.gmCredentialTarget
+    gmCredentialTarget: args.gmCredentialTarget
+      ?? worldConfig.gmCredentialTarget
       ?? fileConfig.credentials?.gmTargets?.[worldId]
       ?? `FoundryCodexBridge/World/${worldId}/GM`,
     allowBlankGmPassword: Boolean(worldConfig.allowBlankGmPassword ?? fileConfig.allowBlankGmPassword),
@@ -251,14 +263,19 @@ foreach ($id in $ids) {
   await execFileAsync("powershell", ["-NoProfile", "-Command", command], { windowsHide: true });
 }
 
-function defaultLaunchFoundryProcess(executablePath) {
-  const child = spawn(executablePath, [], {
+function defaultLaunchFoundryProcess(executablePath, launchArgs = []) {
+  const child = spawn(executablePath, launchArgs, {
     detached: true,
     stdio: "ignore",
     windowsHide: false
   });
   child.unref();
   return { pid: child.pid };
+}
+
+function foundryLaunchArgs(config) {
+  if (config.loginVisibleApp === false) return [];
+  return [`--remote-debugging-port=${config.visibleCdpPort}`];
 }
 
 async function defaultReadCredential(target) {
@@ -317,6 +334,121 @@ try {
   }
 }
 
+function runPowerShellWithJson(command, payload = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn("powershell", ["-NoProfile", "-Command", command], {
+      windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve(stdout);
+        return;
+      }
+      reject(new Error(stderr.trim() || `PowerShell exited with code ${code}`));
+    });
+    child.stdin.end(JSON.stringify(payload));
+  });
+}
+
+async function defaultWriteCredential(target, password, userName = "FoundryCodexBridge") {
+  if (process.platform !== "win32") {
+    throw new Error("Windows Credential Manager is only supported on Windows.");
+  }
+  const command = `
+$ErrorActionPreference = "Stop"
+$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class CredManWrite {
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  public struct CREDENTIAL {
+    public UInt32 Flags;
+    public UInt32 Type;
+    public string TargetName;
+    public string Comment;
+    public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten;
+    public UInt32 CredentialBlobSize;
+    public IntPtr CredentialBlob;
+    public UInt32 Persist;
+    public UInt32 AttributeCount;
+    public IntPtr Attributes;
+    public string TargetAlias;
+    public string UserName;
+  }
+  [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+  public static extern bool CredWrite(ref CREDENTIAL credential, UInt32 flags);
+}
+"@
+$bytes = [Text.Encoding]::Unicode.GetBytes([string]$payload.password)
+$blob = [IntPtr]::Zero
+try {
+  $blob = [Runtime.InteropServices.Marshal]::AllocHGlobal($bytes.Length)
+  [Runtime.InteropServices.Marshal]::Copy($bytes, 0, $blob, $bytes.Length)
+  $credential = New-Object CredManWrite+CREDENTIAL
+  $credential.Flags = 0
+  $credential.Type = 1
+  $credential.TargetName = [string]$payload.target
+  $credential.Comment = "Foundry Codex Bridge lifecycle credential"
+  $credential.CredentialBlobSize = $bytes.Length
+  $credential.CredentialBlob = $blob
+  $credential.Persist = 2
+  $credential.AttributeCount = 0
+  $credential.Attributes = [IntPtr]::Zero
+  $credential.TargetAlias = $null
+  $credential.UserName = [string]$payload.userName
+  if (-not [CredManWrite]::CredWrite([ref]$credential, 0)) {
+    $errorCode = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+    throw "CredWrite failed with Win32 error $errorCode."
+  }
+} finally {
+  if ($blob -ne [IntPtr]::Zero) {
+    for ($i = 0; $i -lt $bytes.Length; $i++) {
+      [Runtime.InteropServices.Marshal]::WriteByte($blob, $i, 0)
+    }
+    [Runtime.InteropServices.Marshal]::FreeHGlobal($blob)
+  }
+  if ($bytes) { [Array]::Clear($bytes, 0, $bytes.Length) }
+}
+`;
+  await runPowerShellWithJson(command, { target, userName, password });
+  return { target, userName, exists: true };
+}
+
+async function defaultDeleteCredential(target) {
+  if (process.platform !== "win32") return { target, deleted: false, supported: false };
+  const command = `
+$ErrorActionPreference = "Stop"
+$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class CredManDelete {
+  [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+  public static extern bool CredDelete(string target, UInt32 type, UInt32 flags);
+}
+"@
+if (-not [CredManDelete]::CredDelete([string]$payload.target, 1, 0)) {
+  $errorCode = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+  if ($errorCode -ne 1168) { throw "CredDelete failed with Win32 error $errorCode." }
+}
+`;
+  await runPowerShellWithJson(command, { target });
+  return { target, deleted: true, supported: true };
+}
+
 function createDefaultLifecycleDeps() {
   return {
     fetch: globalThis.fetch,
@@ -325,6 +457,10 @@ function createDefaultLifecycleDeps() {
     forceKillProcesses: defaultForceKillProcesses,
     launchFoundryProcess: defaultLaunchFoundryProcess,
     readCredential: defaultReadCredential,
+    writeCredential: defaultWriteCredential,
+    deleteCredential: defaultDeleteCredential,
+    credentialSupported: process.platform === "win32",
+    joinVisibleApp: joinVisibleAppWithCdp,
     joinGmClient: joinGmClientWithCdp
   };
 }
@@ -569,9 +705,9 @@ async function evaluate(cdp, fn, args = {}, timeoutMs = 30000) {
   return result.result?.value;
 }
 
-async function waitForCdp(config, deps, timeoutMs = 30000) {
+async function waitForCdpPort(port, deps, timeoutMs = 30000) {
   const started = Date.now();
-  const url = `http://127.0.0.1:${config.cdpPort}/json/version`;
+  const url = `http://127.0.0.1:${port}/json/version`;
   while (Date.now() - started < timeoutMs) {
     try {
       return await fetchJson(url, deps.fetch);
@@ -579,7 +715,11 @@ async function waitForCdp(config, deps, timeoutMs = 30000) {
       await deps.sleep(500);
     }
   }
-  throw new Error(`Timed out waiting for Chrome DevTools on port ${config.cdpPort}`);
+  throw new Error(`Timed out waiting for Chrome DevTools on port ${port}`);
+}
+
+async function waitForCdp(config, deps, timeoutMs = 30000) {
+  return waitForCdpPort(config.cdpPort, deps, timeoutMs);
 }
 
 function launchBrowser(config) {
@@ -589,6 +729,7 @@ function launchBrowser(config) {
     `--remote-debugging-port=${config.cdpPort}`,
     `--user-data-dir=${config.browserProfile}`,
     "--headless=new",
+    `--window-size=${GM_CLIENT_VIEWPORT.width},${GM_CLIENT_VIEWPORT.height}`,
     "--disable-gpu",
     "--no-first-run",
     "--no-default-browser-check",
@@ -615,13 +756,46 @@ async function ensureCdpBrowser(config, deps) {
   }
 }
 
-async function createTarget(config, deps) {
+async function createTargetOnPort(port, url, deps) {
   const target = await fetchJson(
-    `http://127.0.0.1:${config.cdpPort}/json/new?${encodeURIComponent(`${config.foundryUrl}/join`)}`,
+    `http://127.0.0.1:${port}/json/new?${encodeURIComponent(url)}`,
     deps.fetch,
     { method: "PUT" }
   );
   return target.webSocketDebuggerUrl;
+}
+
+async function createTarget(config, deps) {
+  return createTargetOnPort(config.cdpPort, `${config.foundryUrl}/join`, deps);
+}
+
+async function visibleAppTarget(config, deps) {
+  await waitForCdpPort(config.visibleCdpPort, deps, config.timeouts.startupMs);
+  const targets = await fetchJson(`http://127.0.0.1:${config.visibleCdpPort}/json/list`, deps.fetch)
+    .catch(() => []);
+  const target = targets.find((entry) => {
+    return entry.webSocketDebuggerUrl
+      && (entry.type === "page" || entry.type === "webview" || entry.type === "other")
+      && !String(entry.url ?? "").startsWith("devtools://");
+  });
+  if (target?.webSocketDebuggerUrl) {
+    return {
+      reused: true,
+      url: target.url ?? null,
+      webSocketDebuggerUrl: target.webSocketDebuggerUrl
+    };
+  }
+
+  const webSocketDebuggerUrl = await createTargetOnPort(
+    config.visibleCdpPort,
+    `${config.foundryUrl}/join`,
+    deps
+  );
+  return {
+    reused: false,
+    url: `${config.foundryUrl}/join`,
+    webSocketDebuggerUrl
+  };
 }
 
 async function waitFor(cdp, deps, predicate, args = {}, timeoutMs = 120000) {
@@ -648,14 +822,13 @@ async function seedClientSettings(cdp, config) {
   }, { bridgeToken: config.bridgeToken, bridgeUrl: config.bridgeUrl });
 }
 
-async function joinGmClientWithCdp(config, deps, { worldId, gmUserId, gmPassword }) {
-  const browser = await ensureCdpBrowser(config, deps);
-  const wsUrl = await createTarget(config, deps);
-  const cdp = new CdpClient(wsUrl);
+async function joinGmThroughCdp(config, deps, { worldId, gmUserId, gmPassword, webSocketDebuggerUrl, browser = null, visible = false, initialTarget = null }) {
+  const cdp = new CdpClient(webSocketDebuggerUrl);
   await cdp.open();
   try {
     await cdp.send("Page.enable");
     await cdp.send("Runtime.enable");
+    await cdp.send("Emulation.setDeviceMetricsOverride", GM_CLIENT_VIEWPORT);
     await navigate(cdp, deps, `${config.foundryUrl}/join`);
     await seedClientSettings(cdp, config);
     const joinResult = await evaluate(cdp, async ({ userId, password }) => {
@@ -701,6 +874,8 @@ async function joinGmClientWithCdp(config, deps, { worldId, gmUserId, gmPassword
     }, { bridgeToken: config.bridgeToken });
     return {
       browser,
+      visible,
+      target: initialTarget,
       worldId,
       gmUserId,
       moduleEnabledDuringRun: moduleState.changed,
@@ -711,12 +886,166 @@ async function joinGmClientWithCdp(config, deps, { worldId, gmUserId, gmPassword
   }
 }
 
+async function joinGmClientWithCdp(config, deps, { worldId, gmUserId, gmPassword }) {
+  const browser = await ensureCdpBrowser(config, deps);
+  const webSocketDebuggerUrl = await createTarget(config, deps);
+  return joinGmThroughCdp(config, deps, {
+    worldId,
+    gmUserId,
+    gmPassword,
+    webSocketDebuggerUrl,
+    browser,
+    visible: false
+  });
+}
+
+async function joinVisibleAppWithCdp(config, deps, { worldId, gmUserId, gmPassword }) {
+  const target = await visibleAppTarget(config, deps);
+  return joinGmThroughCdp(config, deps, {
+    worldId,
+    gmUserId,
+    gmPassword,
+    webSocketDebuggerUrl: target.webSocketDebuggerUrl,
+    browser: { reused: true, pid: null, cdpPort: config.visibleCdpPort },
+    visible: true,
+    initialTarget: { reused: target.reused, url: target.url }
+  });
+}
+
 async function resolveCredential(config, deps, target, { required, allowBlank = false, label }) {
   const credential = await deps.readCredential(target);
   if (credential) return credential.password ?? "";
   if (allowBlank) return "";
   if (required) throw new Error(`Missing ${label} credential: ${target}`);
   return null;
+}
+
+async function credentialExists(deps, target) {
+  const credential = await deps.readCredential(target);
+  return Boolean(credential);
+}
+
+function writeLifecycleConfig(filePath, config) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+}
+
+function mergeLifecycleWorldConfig(args, context) {
+  const filePath = lifecycleConfigPath(context);
+  const existing = context.lifecycleConfig ?? readJsonIfExists(filePath, {});
+  const worldId = normalizeWorldId(args.worldId);
+  const worlds = { ...(existing.worlds ?? {}) };
+  const credentials = { ...(existing.credentials ?? {}) };
+  const gmCredentialTarget = args.gmCredentialTarget
+    ?? worlds[worldId]?.gmCredentialTarget
+    ?? credentials.gmTargets?.[worldId]
+    ?? `FoundryCodexBridge/World/${worldId}/GM`;
+  const allowBlankGmPassword = args.allowBlankGmPassword === true;
+
+  credentials.adminTarget = args.adminCredentialTarget
+    ?? credentials.adminTarget
+    ?? DEFAULT_ADMIN_CREDENTIAL_TARGET;
+
+  worlds[worldId] = {
+    ...(worlds[worldId] ?? {}),
+    gmUserId: args.gmUserId,
+    allowBlankGmPassword
+  };
+  if (allowBlankGmPassword) {
+    delete worlds[worldId].gmCredentialTarget;
+  } else {
+    worlds[worldId].gmCredentialTarget = gmCredentialTarget;
+  }
+
+  return {
+    filePath,
+    config: {
+      ...existing,
+      version: 1,
+      foundryUrl: args.foundryUrl ?? existing.foundryUrl ?? DEFAULT_FOUNDRY_URL,
+      foundryExecutable: args.foundryExecutable ?? existing.foundryExecutable ?? DEFAULT_FOUNDRY_EXECUTABLE,
+      bridgeCdpPort: Number(args.bridgeCdpPort ?? existing.bridgeCdpPort ?? existing.cdpPort ?? DEFAULT_BRIDGE_CDP_PORT),
+      visibleCdpPort: Number(args.visibleCdpPort ?? existing.visibleCdpPort ?? DEFAULT_VISIBLE_CDP_PORT),
+      loginVisibleApp: args.loginVisibleApp ?? existing.loginVisibleApp ?? true,
+      credentials,
+      worlds
+    },
+    gmCredentialTarget
+  };
+}
+
+export async function lifecycleCredentialStatus(args = {}, context = {}, injectedDeps = {}) {
+  const worldId = normalizeWorldId(args.worldId);
+  if (!worldId) throw new Error("worldId is required.");
+  const config = resolveLifecycleConfig(args, context);
+  const deps = { ...createDefaultLifecycleDeps(), ...injectedDeps };
+  const adminRequired = hasConfiguredAdminPassword(config);
+  const adminExists = await credentialExists(deps, config.adminCredentialTarget);
+  const gmExists = await credentialExists(deps, config.gmCredentialTarget);
+  return {
+    supported: deps.credentialSupported === true,
+    worldId,
+    foundryUrl: config.foundryUrl,
+    foundryExecutable: config.foundryExecutable,
+    configPath: config.configPath,
+    loginVisibleApp: config.loginVisibleApp !== false,
+    visibleCdpPort: config.visibleCdpPort,
+    bridgeCdpPort: config.bridgeCdpPort,
+    admin: {
+      required: adminRequired,
+      target: config.adminCredentialTarget,
+      exists: adminExists
+    },
+    gm: {
+      userId: config.gmUserId,
+      target: config.gmCredentialTarget,
+      exists: gmExists,
+      allowBlank: config.allowBlankGmPassword
+    }
+  };
+}
+
+export async function storeLifecycleCredentials(args = {}, context = {}, injectedDeps = {}) {
+  const worldId = normalizeWorldId(args.worldId);
+  if (!worldId) throw new Error("worldId is required.");
+  if (!args.gmUserId) throw new Error("gmUserId is required.");
+
+  const deps = { ...createDefaultLifecycleDeps(), ...injectedDeps };
+  if (deps.credentialSupported !== true) {
+    throw new Error("Windows Credential Manager lifecycle credential storage is only supported on Windows.");
+  }
+
+  const merged = mergeLifecycleWorldConfig(args, context);
+  const config = resolveLifecycleConfig({
+    ...args,
+    gmCredentialTarget: merged.gmCredentialTarget
+  }, {
+    ...context,
+    lifecycleConfig: merged.config
+  });
+  const adminRequired = hasConfiguredAdminPassword(config);
+  const adminPasswordProvided = Object.hasOwn(args, "adminPassword") && args.adminPassword !== null && args.adminPassword !== undefined;
+  const gmPasswordProvided = Object.hasOwn(args, "gmPassword") && args.gmPassword !== null && args.gmPassword !== undefined;
+
+  if (adminPasswordProvided && String(args.adminPassword).length > 0) {
+    await deps.writeCredential(config.adminCredentialTarget, String(args.adminPassword), "FoundryAdministrator");
+  } else if (adminRequired && !(await credentialExists(deps, config.adminCredentialTarget))) {
+    throw new Error(`Missing Foundry administrator credential: ${config.adminCredentialTarget}`);
+  }
+
+  if (args.allowBlankGmPassword === true) {
+    await deps.deleteCredential(config.gmCredentialTarget);
+  } else if (gmPasswordProvided) {
+    await deps.writeCredential(config.gmCredentialTarget, String(args.gmPassword), String(args.gmUserId));
+  } else if (!(await credentialExists(deps, config.gmCredentialTarget))) {
+    throw new Error(`Missing ${worldId} GM access key credential: ${config.gmCredentialTarget}`);
+  }
+
+  writeLifecycleConfig(merged.filePath, merged.config);
+  return lifecycleCredentialStatus({ worldId }, {
+    ...context,
+    lifecycleConfig: merged.config
+  }, deps);
 }
 
 export async function restartFoundryWorld(args = {}, context = {}, injectedDeps = {}) {
@@ -753,16 +1082,38 @@ export async function restartFoundryWorld(args = {}, context = {}, injectedDeps 
       gm: config.allowBlankGmPassword && gmPassword === "" ? null : config.gmCredentialTarget
     },
     adminCredentialRequired: adminRequired,
+    visibleAppLoginRequired: config.loginVisibleApp !== false && !config.allowHeadlessOnlyFallback,
+    visibleCdpPort: config.loginVisibleApp === false ? null : config.visibleCdpPort,
+    bridgeCdpPort: config.bridgeCdpPort,
     phases: []
   };
 
   result.stop = await runPhase(result, "stop_foundry", () => stopFoundry(config, deps, adminPassword, adminRequired));
   result.start = await runPhase(result, "start_foundry", async () => {
-    const launch = deps.launchFoundryProcess(config.foundryExecutable);
+    const launchArgs = foundryLaunchArgs(config);
+    const launch = deps.launchFoundryProcess(config.foundryExecutable, launchArgs);
     const status = await waitForFoundryHttp(config, deps);
-    return { ...launch, status };
+    return { ...launch, launchArgs, status };
   });
   result.launchWorld = await runPhase(result, "launch_world", () => launchWorld(config, deps, worldId, adminPassword, adminRequired));
+  if (config.loginVisibleApp !== false) {
+    try {
+      result.visibleApp = await runPhase(result, "join_visible_app", () => deps.joinVisibleApp(config, deps, {
+        worldId,
+        gmUserId: config.gmUserId,
+        gmPassword
+      }));
+    } catch (error) {
+      if (!config.allowHeadlessOnlyFallback) throw error;
+      result.visibleApp = {
+        ok: false,
+        fallbackToHeadless: true,
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
+  } else {
+    result.visibleApp = { skipped: true, reason: "loginVisibleApp=false" };
+  }
   result.joinGm = await runPhase(result, "join_gm_client", () => deps.joinGmClient(config, deps, {
     worldId,
     gmUserId: config.gmUserId,

@@ -9,7 +9,11 @@ import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { WebSocketServer } from "ws";
-import { restartFoundryWorld } from "./lifecycle.js";
+import {
+  lifecycleCredentialStatus,
+  restartFoundryWorld,
+  storeLifecycleCredentials
+} from "./lifecycle.js";
 import {
   BRIDGE_VERSION,
   TOOL_DEFINITIONS,
@@ -59,6 +63,9 @@ if (!BRIDGE_TOKEN) {
 const sessions = new Set();
 const pending = new Map();
 let requestSeq = 0;
+const testCredentialStore = process.env.FOUNDRY_BRIDGE_CREDENTIAL_PROVIDER === "memory"
+  ? new Map()
+  : null;
 
 function redact(value) {
   if (Array.isArray(value)) return value.map(redact);
@@ -87,6 +94,34 @@ function textResult(value) {
         text: typeof value === "string" ? value : JSON.stringify(redact(value), null, 2)
       }
     ]
+  };
+}
+
+function lifecycleContext(extra = {}) {
+  return {
+    root: ROOT,
+    configDir: CONFIG_DIR,
+    foundryDataDir: FOUNDRY_DATA_DIR,
+    bridgeHost: BRIDGE_HOST,
+    bridgePort: BRIDGE_PORT,
+    bridgeToken: BRIDGE_TOKEN,
+    ...extra
+  };
+}
+
+function lifecycleCredentialDeps() {
+  if (!testCredentialStore) return {};
+  return {
+    credentialSupported: true,
+    readCredential: async (target) => testCredentialStore.get(target) ?? null,
+    writeCredential: async (target, password, userName) => {
+      testCredentialStore.set(target, { password, userName });
+      return { target, userName, exists: true };
+    },
+    deleteCredential: async (target) => {
+      const deleted = testCredentialStore.delete(target);
+      return { target, deleted, supported: true };
+    }
   };
 }
 
@@ -398,6 +433,37 @@ function sendFoundryRequest(method, args = {}, { requireConnected = true } = {})
   });
 }
 
+function assertLifecycleSession(session, message) {
+  if (message.token !== BRIDGE_TOKEN) {
+    throw new Error("Invalid bridge token");
+  }
+  if (!isTrustedSession(session)) {
+    throw new Error("Lifecycle credential setup requires a trusted GM Foundry bridge session.");
+  }
+  const requestedWorld = normalizeWorldId(message.args?.worldId ?? session.hello?.worldId);
+  if (!requestedWorld) throw new Error("worldId is required.");
+  if (requestedWorld !== normalizeWorldId(session.hello?.worldId)) {
+    throw new Error("Lifecycle credential setup can only configure the currently trusted world.");
+  }
+  return {
+    ...(message.args ?? {}),
+    worldId: requestedWorld
+  };
+}
+
+async function handleLifecycleCredentialMessage(session, message) {
+  let result;
+  const args = assertLifecycleSession(session, message);
+  if (message.type === "lifecycleCredentialStatus") {
+    result = await lifecycleCredentialStatus(args, lifecycleContext(), lifecycleCredentialDeps());
+  } else if (message.type === "storeLifecycleCredentials") {
+    result = await storeLifecycleCredentials(args, lifecycleContext(), lifecycleCredentialDeps());
+  } else {
+    throw new Error(`Unsupported lifecycle credential message: ${message.type}`);
+  }
+  return result;
+}
+
 async function foundryStatus() {
   const session = activeSession();
   const p = paths(session?.hello?.worldId ?? null);
@@ -666,14 +732,7 @@ async function executeTool(method, args = {}) {
     case "list_trusted_worlds":
       return { trustedWorlds: listTrustedWorlds(), path: TRUSTED_WORLDS_FILE };
     case "restart_foundry_world":
-      return restartFoundryWorld(args, {
-        root: ROOT,
-        configDir: CONFIG_DIR,
-        foundryDataDir: FOUNDRY_DATA_DIR,
-        bridgeHost: BRIDGE_HOST,
-        bridgePort: BRIDGE_PORT,
-        bridgeToken: BRIDGE_TOKEN
-      });
+      return restartFoundryWorld(args, lifecycleContext());
     case "revoke_trusted_world":
       return revokeTrustedWorld(args.worldId);
     case "backup_world":
@@ -832,6 +891,35 @@ function startBridgeServer() {
           revocation: result,
           trustedWorlds: listTrustedWorlds().map((entry) => entry.id)
         }));
+        return;
+      }
+
+      if (message.type === "lifecycleCredentialStatus" || message.type === "storeLifecycleCredentials") {
+        (async () => {
+          try {
+            const result = await handleLifecycleCredentialMessage(session, message);
+            ws.send(JSON.stringify({
+              type: "lifecycleResponse",
+              requestType: message.type,
+              id: message.id ?? null,
+              ok: true,
+              result: redact(result)
+            }));
+          } catch (error) {
+            const messageText = error instanceof Error ? error.message : String(error);
+            if (messageText === "Invalid bridge token") {
+              ws.close(1008, "Invalid token");
+              return;
+            }
+            ws.send(JSON.stringify({
+              type: "lifecycleResponse",
+              requestType: message.type,
+              id: message.id ?? null,
+              ok: false,
+              error: messageText
+            }));
+          }
+        })();
         return;
       }
 

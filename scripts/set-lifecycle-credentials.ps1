@@ -7,6 +7,9 @@ param(
 
   [string]$FoundryUrl = "http://127.0.0.1:30000",
   [string]$FoundryExecutable = "C:\Program Files\Foundry Virtual Tabletop\Foundry Virtual Tabletop.exe",
+  [int]$BridgeCdpPort = 39223,
+  [int]$VisibleCdpPort = 39224,
+  [bool]$LoginVisibleApp = $true,
   [string]$AdminCredentialTarget = "FoundryCodexBridge/AdminPassword",
   [string]$GmCredentialTarget,
   [switch]$SkipAdminPassword,
@@ -152,6 +155,9 @@ $config = [ordered]@{
   version = 1
   foundryUrl = $FoundryUrl
   foundryExecutable = $FoundryExecutable
+  bridgeCdpPort = $BridgeCdpPort
+  visibleCdpPort = $VisibleCdpPort
+  loginVisibleApp = $LoginVisibleApp
   credentials = $credentials
   worlds = $worlds
 }

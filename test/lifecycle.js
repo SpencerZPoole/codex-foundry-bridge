@@ -3,7 +3,11 @@ import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { restartFoundryWorld } from "../src/lifecycle.js";
+import {
+  lifecycleCredentialStatus,
+  restartFoundryWorld,
+  storeLifecycleCredentials
+} from "../src/lifecycle.js";
 
 const worldId = "scratch";
 const gmUserId = "gm-user";
@@ -189,14 +193,36 @@ function createDeps(state, credentials) {
       state.httpUp = false;
       state.activeWorld = null;
     },
-    launchFoundryProcess: () => {
+    launchFoundryProcess: (executablePath, launchArgs = []) => {
       state.launches += 1;
+      state.launchArgs = launchArgs;
       state.running = true;
       state.httpUp = true;
       state.activeWorld = null;
       return { pid: 2002 };
     },
     readCredential: async (target) => credentials.get(target) ?? null,
+    credentialSupported: true,
+    writeCredential: async (target, password, userName) => {
+      credentials.set(target, { password, userName });
+      return { target, userName, exists: true };
+    },
+    deleteCredential: async (target) => {
+      const deleted = credentials.delete(target);
+      return { target, deleted, supported: true };
+    },
+    joinVisibleApp: async (config, deps, { gmUserId: userId, gmPassword }) => {
+      if (state.visibleJoinFails) throw new Error("visible app login failed");
+      assert.equal(userId, gmUserId);
+      assert.equal(gmPassword, state.expectedGmPassword);
+      state.visibleJoinedGmUser = userId;
+      return {
+        visible: true,
+        worldId: state.activeWorld,
+        gmUserId: userId,
+        bridgeStatus: { world: { id: state.activeWorld } }
+      };
+    },
     joinGmClient: async (config, deps, { gmUserId: userId, gmPassword }) => {
       assert.equal(userId, gmUserId);
       assert.equal(gmPassword, state.expectedGmPassword);
@@ -212,7 +238,15 @@ function createDeps(state, credentials) {
   };
 }
 
-async function runRestart({ adminRequired = false, quitStops = true, allowBlank = false, staleDataLock = false, credentials = new Map() } = {}) {
+async function runRestart({
+  adminRequired = false,
+  quitStops = true,
+  allowBlank = false,
+  staleDataLock = false,
+  credentials = new Map(),
+  visibleJoinFails = false,
+  extraArgs = {}
+} = {}) {
   const temp = createTempContext({
     adminRequired,
     lifecycleConfig: {
@@ -239,6 +273,9 @@ async function runRestart({ adminRequired = false, quitStops = true, allowBlank 
     quitAttempts: 0,
     forceKills: 0,
     launches: 0,
+    launchArgs: [],
+    visibleJoinFails,
+    visibleJoinedGmUser: null,
     bridgeReady: false,
     joinedGmUser: null
   };
@@ -258,6 +295,7 @@ async function runRestart({ adminRequired = false, quitStops = true, allowBlank 
       dangerous: true,
       foundryExecutable: temp.executable,
       foundryUrl: `http://127.0.0.1:${foundryPort}`,
+      ...extraArgs,
       timeouts: {
         stopGraceMs: 10,
         stopForceMs: 10,
@@ -265,7 +303,8 @@ async function runRestart({ adminRequired = false, quitStops = true, allowBlank 
         worldLaunchMs: 100,
         gmJoinMs: 100,
         bridgeReadyMs: 100,
-        pollMs: 1
+        pollMs: 1,
+        ...(extraArgs.timeouts ?? {})
       }
     }, temp.context, deps);
     return { result, state };
@@ -335,11 +374,14 @@ await assert.rejects(
   assert.equal(result.stop.forced, false);
   assert.equal(result.stop.method, "foundry-quit-route");
   assert.equal(result.start.pid, 2002);
+  assert.deepEqual(result.start.launchArgs, ["--remote-debugging-port=39224"]);
   assert.equal(result.launchWorld.world, worldId);
+  assert.equal(result.visibleApp.visible, true);
   assert.equal(result.bridge.activeWorld, worldId);
   assert.equal(state.quitAttempts, 1);
   assert.equal(state.forceKills, 0);
   assert.equal(state.launches, 1);
+  assert.equal(state.visibleJoinedGmUser, gmUserId);
   assert.equal(JSON.stringify(result).includes("admin-secret"), false);
   assert.equal(JSON.stringify(result).includes("gm-secret"), false);
 }
@@ -359,7 +401,64 @@ await assert.rejects(
   assert.equal(result.stop.dataLock.exists, false);
   assert.equal(result.credentialTargets.gm, null);
   assert.equal(state.forceKills, 1);
+  assert.equal(state.visibleJoinedGmUser, gmUserId);
   assert.equal(state.joinedGmUser, gmUserId);
+}
+
+await assert.rejects(
+  () => runRestart({
+    allowBlank: true,
+    visibleJoinFails: true,
+    credentials: new Map()
+  }),
+  /visible app login failed/
+);
+
+{
+  const { result, state } = await runRestart({
+    allowBlank: true,
+    visibleJoinFails: true,
+    credentials: new Map(),
+    extraArgs: { allowHeadlessOnlyFallback: true }
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.visibleApp.fallbackToHeadless, true);
+  assert.equal(state.joinedGmUser, gmUserId);
+}
+
+{
+  const temp = createTempContext();
+  const credentials = new Map();
+  const deps = createDeps({ running: false }, credentials);
+  try {
+    let status = await lifecycleCredentialStatus({ worldId }, temp.context, deps);
+    assert.equal(status.supported, true);
+    assert.equal(status.gm.exists, false);
+
+    status = await storeLifecycleCredentials({
+      worldId,
+      gmUserId,
+      gmPassword: "gm-secret",
+      foundryUrl: "http://127.0.0.1:30000"
+    }, temp.context, deps);
+    assert.equal(status.gm.exists, true);
+    assert.equal(credentials.get(gmTarget).password, "gm-secret");
+    assert.equal(
+      fs.readFileSync(path.join(temp.context.configDir, "lifecycle.json"), "utf8").includes("gm-secret"),
+      false
+    );
+
+    status = await storeLifecycleCredentials({
+      worldId,
+      gmUserId,
+      allowBlankGmPassword: true
+    }, temp.context, deps);
+    assert.equal(status.gm.allowBlank, true);
+    assert.equal(status.gm.exists, false);
+    assert.equal(credentials.has(gmTarget), false);
+  } finally {
+    fs.rmSync(temp.tempRoot, { recursive: true, force: true });
+  }
 }
 
 console.log("Lifecycle restart orchestration checks passed.");

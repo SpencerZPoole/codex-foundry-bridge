@@ -1,10 +1,10 @@
 # Foundry Codex Bridge v1.0 Audit + Roadmap
 
-Last verified: 2026-05-20
+Last verified: 2026-05-21
 
 ## Summary
 
-`FoundryCodexBridge` is currently a strong local-only FoundryVTT control bridge, not just a proof of concept. Version `0.2.6` exposes a shared registry of 36 MCP/daemon tools, supports direct MCP discovery plus `call_bridge_tool` fallback dispatch, and adds a guarded local Foundry app lifecycle restart workflow for explicit worlds.
+`FoundryCodexBridge` is currently a strong local-only FoundryVTT control bridge, not just a proof of concept. Version `0.2.7` exposes a shared registry of 36 MCP/daemon tools, supports direct MCP discovery plus `call_bridge_tool` fallback dispatch, and adds a guarded local Foundry app lifecycle restart workflow for explicit worlds.
 
 The v1.0 release goal is **Guarded Power**: expand practical live-project ability substantially while preserving the current safety model: localhost daemon, bridge token, trusted GM session gate, redaction, backups before destructive edits, and explicit `dangerous=true` for raw GM script execution.
 
@@ -14,19 +14,19 @@ This document is the durable local roadmap. Keep it updated as v1.0 work lands.
 
 ### Verified State
 
-- Bridge/package/module version: `0.2.6`
+- Bridge/package/module version: `0.2.7`
 - Registry version: `1`
-- Registry checksum: `4d2484dde5de42dd7dc9b891b59617a79e9234652690f2e2defe68e274cb59d4`
+- Registry checksum: `9aef8618dbcc034a1acef03cbfd3ffda4b0041325b7d75c5ff4931456204725e`
 - Registered tools: `36`
 - Live validation world: `scratch`
 - Live Foundry: `14.361`
 - Live system: `D35E 3.0.2`
-- Live bridge status: daemon verified at `0.2.6`; `bridge_self_check.ready=false` until the `scratch` GM client is relaunched
-- Live module script version: installed at `0.2.6`; live GM-client verification is pending admin credential setup
-- Installed module manifest file version: `0.2.6`
-- Trusted GM sessions: `0` after lifecycle restart testing stopped at Foundry setup authentication
-- Runtime event health: unavailable without an active trusted GM client
-- Current self-check action items: store the Foundry administrator credential as `FoundryCodexBridge/AdminPassword`, rerun `restart_foundry_world` for `scratch`, then verify `bridge_self_check.ready=true`
+- Live bridge status: daemon verified at `0.2.7`; `bridge_self_check.ready=true`
+- Live module script version: `0.2.7`
+- Installed module manifest file version: `0.2.7`
+- Trusted GM sessions: `2` after visible Electron GM login plus managed bridge GM client restart validation
+- Runtime event health: no errors; only Foundry V1 Application deprecation warnings from compatibility UI paths
+- Current self-check action items: none
 
 Do not use `return-to-undermountain` for validation unless explicitly requested.
 
@@ -72,7 +72,7 @@ The bridge currently provides:
 - Runtime diagnostics are recent and bounded, not a durable session event timeline.
 - There is no rollback browser, restore assistant, or transaction history viewer.
 - There are no permission/profile presets for different operating modes such as read-only, prep, session, maintenance, or dangerous-script-enabled.
-- Lifecycle restart targets a bridge-ready GM client, not guaranteed visible Electron-window interaction.
+- Lifecycle restart now targets both visible Electron-window GM login and a managed bridge GM client, but this CDP path still needs live hardening across more Foundry/Electron versions.
 - Documentation is good for setup, but sparse for real GM workflows and v1 compatibility guarantees.
 
 ## v1.0 Release Target
@@ -98,17 +98,21 @@ For v1.0, document and preserve:
 
 ### Lifecycle Hardening Slice
 
-Status: implemented for the `0.2.6` development slice; full live `scratch` restart is blocked until the Foundry administrator password is stored in Windows Credential Manager.
+Status: expanded for the `0.2.7` development slice.
 
 The `restart_foundry_world` tool is a guarded local lifecycle orchestrator, not a live-world mutation tool. It requires `dangerous=true`, an explicit `worldId`, and Windows Credential Manager credentials when Foundry administrator or GM passwords are configured. It preserves localhost, token auth, redaction, and trusted-world requirements: after restart, live-world tools become ready only if the launched world is already trusted.
 
+The `0.2.7` slice changes the lifecycle end state from headless-only bridge recovery to visible-app plus bridge recovery. The daemon now launches the visible Electron app with a dedicated CDP port, drives it into the requested world as GM, and still maintains a separate managed GM client for reliable bridge connectivity. The module also exposes a GM-only lifecycle credential wizard that stores admin and per-world GM secrets through the localhost daemon into Windows Credential Manager.
+
 Live findings from the `scratch` validation pass:
 
+- Confirmed `restart_foundry_world({ worldId: "scratch", dangerous: true })` fully stopped Foundry, relaunched the Electron app with `--remote-debugging-port=39224`, launched `scratch`, joined the visible app as GM at `/game`, joined the managed bridge GM client, and verified `bridge_self_check.ready=true`.
+- Confirmed registry checksum `9aef8618dbcc034a1acef03cbfd3ffda4b0041325b7d75c5ff4931456204725e` matches the live daemon, tool list, fallback dispatch, and committed capability manifest.
 - Confirmed the tool fully gates on `dangerous=true`, explicit `worldId`, and the configured credential targets.
 - Confirmed force-stop fallback only targets processes whose executable path exactly matches the configured Foundry executable.
 - Added stale Foundry data lock recovery for `Config/options.json.lock` after force-stop, guarded by the same exact executable-process check.
 - Confirmed Foundry 14 uses `Config/admin.txt` as the durable setup-admin lock indicator; `options.json` alone is not sufficient for admin-password detection.
-- Current blocker: no Windows Credential Manager entry exists for `FoundryCodexBridge/AdminPassword`, so the daemon now refuses safely before touching the running app.
+- Current validation target: `scratch` only. Do not use `return-to-undermountain` for this lifecycle validation unless explicitly requested by exact world id.
 
 ## v1.0 Roadmap
 

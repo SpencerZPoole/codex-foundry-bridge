@@ -21,6 +21,8 @@ const dynamicWorldId = "dynamic-smoke-world";
 const registeredToolNames = TOOL_DEFINITIONS.map((tool) => tool.name);
 
 fs.mkdirSync(path.join(foundryDataDir, "Data", "worlds", dynamicWorldId), { recursive: true });
+fs.mkdirSync(path.join(foundryDataDir, "Config"), { recursive: true });
+fs.writeFileSync(path.join(foundryDataDir, "Config", "options.json"), "{}", "utf8");
 assert.equal(new Set(registeredToolNames).size, registeredToolNames.length);
 assert.ok(registeredToolNames.includes("bridge_self_check"));
 assert.ok(registeredToolNames.includes("call_bridge_tool"));
@@ -83,6 +85,13 @@ async function callBridge(method, args = {}, { expectOk = true } = {}) {
   return { response, body };
 }
 
+let lifecycleMessageId = 0;
+function sendLifecycleMessage(ws, type, args = {}) {
+  const id = ++lifecycleMessageId;
+  ws.send(JSON.stringify({ type, id, token, args }));
+  return waitForMessage(ws, (message) => message.type === "lifecycleResponse" && message.id === id);
+}
+
 async function withMcpClient(callback) {
   const client = new Client({ name: "foundry-codex-bridge-smoke", version: "0.0.0" });
   const transport = new StdioClientTransport({
@@ -114,7 +123,8 @@ const child = spawn(process.execPath, ["src/server.js"], {
     CODEX_FOUNDRY_BRIDGE_TOKEN: token,
     FOUNDRY_BRIDGE_PORT: String(port),
     FOUNDRY_BRIDGE_CONFIG_DIR: configDir,
-    FOUNDRY_DATA_DIR: foundryDataDir
+    FOUNDRY_DATA_DIR: foundryDataDir,
+    FOUNDRY_BRIDGE_CREDENTIAL_PROVIDER: "memory"
   },
   stdio: ["pipe", "pipe", "pipe"]
 });
@@ -260,6 +270,10 @@ try {
   assert.equal(refusedFallbackLiveTool.response.status, 500);
   assert.match(refusedFallbackLiveTool.body.error, /trusted GM Foundry bridge session/);
 
+  const refusedCredentialStatus = await sendLifecycleMessage(gm, "lifecycleCredentialStatus", { worldId: dynamicWorldId });
+  assert.equal(refusedCredentialStatus.ok, false);
+  assert.match(refusedCredentialStatus.error, /trusted GM Foundry bridge session/);
+
   gm.send(JSON.stringify({ type: "authorizeWorld", token }));
   const authorized = await waitForMessage(gm, (message) => message.type === "authorizationStatus" && message.trusted === true);
   assert.equal(authorized.world.id, dynamicWorldId);
@@ -282,6 +296,22 @@ try {
 
   const trustedWorlds = await callBridge("list_trusted_worlds");
   assert.deepEqual(trustedWorlds.body.result.trustedWorlds.map((world) => world.id), [dynamicWorldId]);
+
+  const credentialStatus = await sendLifecycleMessage(gm, "lifecycleCredentialStatus", { worldId: dynamicWorldId });
+  assert.equal(credentialStatus.ok, true);
+  assert.equal(credentialStatus.result.supported, true);
+  assert.equal(credentialStatus.result.gm.exists, false);
+
+  const storedCredentials = await sendLifecycleMessage(gm, "storeLifecycleCredentials", {
+    worldId: dynamicWorldId,
+    gmUserId: "gm",
+    gmPassword: "gm-secret",
+    foundryUrl: "http://127.0.0.1:30000"
+  });
+  assert.equal(storedCredentials.ok, true);
+  assert.equal(storedCredentials.result.gm.exists, true);
+  assert.equal(JSON.stringify(storedCredentials).includes("gm-secret"), false);
+  assert.equal(fs.readFileSync(path.join(configDir, "lifecycle.json"), "utf8").includes("gm-secret"), false);
 
   const collectionsViaFallback = await callBridge("call_bridge_tool", {
     method: "list_collections"

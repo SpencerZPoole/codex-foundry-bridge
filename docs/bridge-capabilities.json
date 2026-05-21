@@ -1,7 +1,7 @@
 {
-  "bridgeVersion": "0.2.6",
+  "bridgeVersion": "0.2.7",
   "registryVersion": 1,
-  "checksum": "4d2484dde5de42dd7dc9b891b59617a79e9234652690f2e2defe68e274cb59d4",
+  "checksum": "9aef8618dbcc034a1acef03cbfd3ffda4b0041325b7d75c5ff4931456204725e",
   "toolCount": 36,
   "fallback": {
     "tool": "call_bridge_tool",
@@ -521,9 +521,13 @@
       "directMcpExposure": true,
       "fallbackCallable": true,
       "inputKeys": [
+        "allowHeadlessOnlyFallback",
+        "bridgeCdpPort",
         "dangerous",
         "gmUserId",
+        "loginVisibleApp",
         "timeouts",
+        "visibleCdpPort",
         "worldId"
       ]
     },

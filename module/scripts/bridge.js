@@ -1,5 +1,5 @@
 const MODULE_ID = "codex-foundry-bridge";
-const MODULE_VERSION = "0.2.6";
+const MODULE_VERSION = "0.2.7";
 const DEFAULT_URL = "ws://127.0.0.1:30123/foundry";
 const RECONNECT_MS = 5000;
 const MAX_RESULT_CHARS = 1_000_000;
@@ -34,6 +34,8 @@ let runtimeEvents = [];
 let authorizationStatus = { trusted: null, world: null, trustedWorlds: [] };
 let authorizationPromptOpen = false;
 let authorizationPromptDismissedForWorld = null;
+let lifecycleRequestCounter = 0;
+const lifecyclePending = new Map();
 
 function isSensitiveField(key) {
   return String(key).toLowerCase() === "token" || SENSITIVE_FIELD_PATTERN.test(key);
@@ -874,6 +876,44 @@ function send(message) {
   socket.send(JSON.stringify(message));
 }
 
+function handleLifecycleResponse(payload = {}) {
+  const item = lifecyclePending.get(payload.id);
+  if (!item) return;
+  window.clearTimeout(item.timer);
+  lifecyclePending.delete(payload.id);
+  if (payload.ok) item.resolve(payload.result);
+  else item.reject(new Error(payload.error || "Lifecycle credential request failed"));
+}
+
+function sendLifecycleRequest(type, args = {}) {
+  if (!game.user?.isGM) throw new Error("Lifecycle setup is only available to GM users.");
+  if (authorizationStatus.trusted !== true) {
+    throw new Error("Authorize this world with Codex Foundry Bridge before storing lifecycle credentials.");
+  }
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    throw new Error("Codex Foundry Bridge daemon is not connected.");
+  }
+
+  const token = game.settings.get(MODULE_ID, "bridgeToken");
+  const id = ++lifecycleRequestCounter;
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      lifecyclePending.delete(id);
+      reject(new Error("Timed out waiting for lifecycle credential response."));
+    }, 30000);
+    lifecyclePending.set(id, { resolve, reject, timer });
+    send({
+      type,
+      id,
+      token,
+      args: {
+        worldId: game.world.id,
+        ...args
+      }
+    });
+  });
+}
+
 function currentWorldPayload(token = game.settings.get(MODULE_ID, "bridgeToken")) {
   return {
     token,
@@ -906,6 +946,165 @@ function revokeCurrentWorld() {
   send({
     type: "revokeWorld",
     ...currentWorldPayload()
+  });
+}
+
+function gmUsers() {
+  return Array.from(game.users ?? []).filter((user) => user?.isGM === true || Number(user?.role) >= 4);
+}
+
+function lifecycleWizardId() {
+  return `${MODULE_ID}-lifecycle-setup`;
+}
+
+function closeLifecycleSetupWizard() {
+  document.getElementById(lifecycleWizardId())?.remove();
+}
+
+function lifecycleStatusRows(status) {
+  if (!status) return "";
+  return [
+    ["World", `${game.world.title} (${game.world.id})`],
+    ["Lifecycle config", status.configPath],
+    ["Visible app login", status.loginVisibleApp ? `enabled on CDP ${status.visibleCdpPort}` : "disabled"],
+    ["Bridge GM client", `CDP ${status.bridgeCdpPort}`],
+    ["Admin credential", status.admin.required ? `${status.admin.exists ? "stored" : "missing"} (${status.admin.target})` : "not required"],
+    ["GM credential", status.gm.allowBlank ? "blank access key configured" : `${status.gm.exists ? "stored" : "missing"} (${status.gm.target})`]
+  ].map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd>`).join("");
+}
+
+function renderLifecycleSetupWizard(status = null, message = "", error = "") {
+  closeLifecycleSetupWizard();
+  const users = gmUsers();
+  const selectedUser = status?.gm?.userId ?? game.user.id;
+  const userOptions = users.map((user) => {
+    const selected = user.id === selectedUser ? " selected" : "";
+    return `<option value="${escapeHtml(user.id)}"${selected}>${escapeHtml(user.name)} (${escapeHtml(user.id)})</option>`;
+  }).join("");
+  const adminField = status?.admin?.required
+    ? [
+        "<label>",
+        "<span>Foundry administrator password</span>",
+        "<input type=\"password\" name=\"adminPassword\" autocomplete=\"off\" placeholder=\"Leave blank to keep stored credential\">",
+        "</label>"
+      ].join("")
+    : "";
+  const gmPasswordDisabled = status?.gm?.allowBlank ? " disabled" : "";
+  const supported = status?.supported !== false;
+  const content = [
+    `<div class="${MODULE_ID}-overlay">`,
+    `<form class="${MODULE_ID}-wizard">`,
+    "<header>",
+    "<h2>Codex Foundry Bridge Lifecycle Setup</h2>",
+    `<button type="button" data-action="close" title="Close" aria-label="Close">x</button>`,
+    "</header>",
+    message ? `<p class="notice">${escapeHtml(message)}</p>` : "",
+    error ? `<p class="error">${escapeHtml(error)}</p>` : "",
+    !supported ? "<p class=\"error\">Windows Credential Manager storage is not available in this environment.</p>" : "",
+    status ? `<dl>${lifecycleStatusRows(status)}</dl>` : "<p>Loading lifecycle status...</p>",
+    "<label>",
+    "<span>Game Master user</span>",
+    `<select name="gmUserId">${userOptions}</select>`,
+    "</label>",
+    adminField,
+    "<label>",
+    "<span>World GM access key</span>",
+    `<input type="password" name="gmPassword" autocomplete="off" placeholder="Leave blank to keep stored credential"${gmPasswordDisabled}>`,
+    "</label>",
+    "<label class=\"check\">",
+    `<input type="checkbox" name="allowBlankGmPassword"${status?.gm?.allowBlank ? " checked" : ""}>`,
+    "<span>This GM user has a blank access key</span>",
+    "</label>",
+    "<footer>",
+    "<button type=\"button\" data-action=\"refresh\">Refresh</button>",
+    "<button type=\"submit\">Store Lifecycle Settings</button>",
+    "</footer>",
+    "</form>",
+    "</div>"
+  ].join("");
+
+  const wrapper = document.createElement("div");
+  wrapper.id = lifecycleWizardId();
+  wrapper.innerHTML = [
+    "<style>",
+    `#${lifecycleWizardId()} .${MODULE_ID}-overlay{position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:24px;}`,
+    `#${lifecycleWizardId()} .${MODULE_ID}-wizard{width:min(720px,calc(100vw - 48px));max-height:calc(100vh - 48px);overflow:auto;background:#f3efe4;color:#181511;border:1px solid #4b4235;box-shadow:0 18px 80px rgba(0,0,0,.5);padding:18px;display:grid;gap:12px;}`,
+    `#${lifecycleWizardId()} header,#${lifecycleWizardId()} footer{display:flex;align-items:center;justify-content:space-between;gap:12px;}`,
+    `#${lifecycleWizardId()} h2{font-size:20px;margin:0;}`,
+    `#${lifecycleWizardId()} dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 12px;margin:0;padding:10px;background:rgba(0,0,0,.06);}`,
+    `#${lifecycleWizardId()} dt{font-weight:700;}`,
+    `#${lifecycleWizardId()} dd{margin:0;word-break:break-word;}`,
+    `#${lifecycleWizardId()} label{display:grid;gap:4px;font-weight:700;}`,
+    `#${lifecycleWizardId()} label.check{display:flex;align-items:center;gap:8px;font-weight:400;}`,
+    `#${lifecycleWizardId()} input,#${lifecycleWizardId()} select{min-height:32px;padding:5px 7px;}`,
+    `#${lifecycleWizardId()} .notice{margin:0;color:#124d21;}`,
+    `#${lifecycleWizardId()} .error{margin:0;color:#8a1f17;}`,
+    "</style>",
+    content
+  ].join("");
+  document.body.appendChild(wrapper);
+
+  const form = wrapper.querySelector("form");
+  const blankCheckbox = form.querySelector("input[name='allowBlankGmPassword']");
+  const gmPassword = form.querySelector("input[name='gmPassword']");
+  blankCheckbox.addEventListener("change", () => {
+    gmPassword.disabled = blankCheckbox.checked;
+    if (blankCheckbox.checked) gmPassword.value = "";
+  });
+  wrapper.querySelector("[data-action='close']").addEventListener("click", closeLifecycleSetupWizard);
+  wrapper.querySelector("[data-action='refresh']").addEventListener("click", () => {
+    void openLifecycleSetupWizard("Lifecycle status refreshed.");
+  });
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const formData = new FormData(form);
+    const allowBlankGmPassword = formData.get("allowBlankGmPassword") === "on";
+    const payload = {
+      worldId: game.world.id,
+      gmUserId: String(formData.get("gmUserId") ?? ""),
+      allowBlankGmPassword,
+      foundryUrl: window.location.origin
+    };
+    const adminPassword = String(formData.get("adminPassword") ?? "");
+    const worldPassword = String(formData.get("gmPassword") ?? "");
+    if (adminPassword) payload.adminPassword = adminPassword;
+    if (!allowBlankGmPassword && worldPassword) payload.gmPassword = worldPassword;
+
+    try {
+      const updated = await sendLifecycleRequest("storeLifecycleCredentials", payload);
+      renderLifecycleSetupWizard(updated, "Lifecycle credentials and non-secret settings were stored.");
+    } catch (submitError) {
+      renderLifecycleSetupWizard(status, "", submitError instanceof Error ? submitError.message : String(submitError));
+    }
+  });
+}
+
+async function openLifecycleSetupWizard(message = "") {
+  try {
+    renderLifecycleSetupWizard(null, "Loading lifecycle status...");
+    const status = await sendLifecycleRequest("lifecycleCredentialStatus", { worldId: game.world.id });
+    renderLifecycleSetupWizard(status, message);
+  } catch (error) {
+    renderLifecycleSetupWizard(null, "", error instanceof Error ? error.message : String(error));
+  }
+}
+
+function registerLifecycleSetupMenu() {
+  const BaseApplication = globalThis.FormApplication ?? globalThis.Application;
+  if (!BaseApplication || !game.settings?.registerMenu) return;
+  class LifecycleSetupMenu extends BaseApplication {
+    render(force, options) {
+      void openLifecycleSetupWizard();
+      return this;
+    }
+  }
+  game.settings.registerMenu(MODULE_ID, "lifecycleSetup", {
+    name: "Lifecycle Credential Setup",
+    label: "Open Setup",
+    hint: "Store local restart/login credentials for this trusted GM world.",
+    icon: "fas fa-key",
+    type: LifecycleSetupMenu,
+    restricted: true
   });
 }
 
@@ -1002,6 +1201,11 @@ function connect() {
       return;
     }
 
+    if (payload.type === "lifecycleResponse") {
+      handleLifecycleResponse(payload);
+      return;
+    }
+
     if (payload.type !== "request") return;
 
     if (authorizationStatus.trusted !== true) {
@@ -1034,6 +1238,11 @@ function connect() {
 
   socket.addEventListener("close", () => {
     socket = null;
+    for (const [id, item] of lifecyclePending) {
+      window.clearTimeout(item.timer);
+      item.reject(new Error("Codex Foundry Bridge daemon connection closed."));
+      lifecyclePending.delete(id);
+    }
     if (reconnectTimer) window.clearTimeout(reconnectTimer);
     reconnectTimer = window.setTimeout(connect, RECONNECT_MS);
   });
@@ -1080,6 +1289,8 @@ Hooks.once("init", () => {
     type: String,
     default: ""
   });
+
+  registerLifecycleSetupMenu();
 });
 
 Hooks.once("ready", () => {
@@ -1092,6 +1303,7 @@ Hooks.once("ready", () => {
     authorizationStatus: () => authorizationStatus,
     status: async () => handleBridgeRequest("foundry_status", {}),
     request: async (method, args) => handleBridgeRequest(method, args),
+    openLifecycleSetup: openLifecycleSetupWizard,
     getRuntimeEvents,
     clearRuntimeEvents,
     installRuntimeCapture
