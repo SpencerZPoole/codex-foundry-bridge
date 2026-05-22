@@ -246,6 +246,9 @@ MIT. See `LICENSE`.
 
 ## Donate
 
-If Foundry Codex Bridge helped your local GM workflow, you can donate through [GitHub Sponsors](https://github.com/sponsors/SpencerZPoole) or [PayPal](https://paypal.me/mrpooley92). GitHub Sponsors is best for recurring sponsorships; PayPal works well for one-time donations.
+If this project helped your local GM workflow, donations are welcome. GitHub Sponsors is best for recurring sponsorships; PayPal works well for one-time donations.
+
+[![Sponsor on GitHub](https://img.shields.io/badge/GitHub%20Sponsors-Donate-ea4aaa?style=flat&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/SpencerZPoole)
+[![Donate with PayPal](https://img.shields.io/badge/PayPal-One--time%20donation-00457C?style=flat&logo=paypal&logoColor=white)](https://paypal.me/mrpooley92)
 
 The bridge remains local-first, open source, and usable without donations.
