@@ -2,13 +2,6 @@
 
 Local-first MCP tooling for safely operating a trusted Foundry VTT GM session from Codex.
 
-<p>
-  <a href="https://paypal.me/mrpooley92">
-    <img src="https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/paypal.svg" alt="PayPal" width="18" />
-    Donate
-  </a>
-</p>
-
 Foundry Codex Bridge is a security-conscious bridge between AI coding agents and live Foundry VTT worlds. It is designed for real campaign operations, not just demos: inspect the world, diagnose the bridge, preview changes, apply confirmed plans, restart the local Foundry app, and keep private campaign data behind a trusted GM session gate.
 
 The project direction is **Guarded Power**: expose useful live-world capability while keeping localhost transport, token auth, GM authorization, redaction, explicit high-risk gates, and backup-first behavior in the workflow.
@@ -250,3 +243,9 @@ npm test
 ## License
 
 MIT. See `LICENSE`.
+
+## Support
+
+If Foundry Codex Bridge helps your local GM workflow, optional support is welcome: [paypal.me/mrpooley92](https://paypal.me/mrpooley92).
+
+The bridge remains local-first, open source, and usable without donations.
