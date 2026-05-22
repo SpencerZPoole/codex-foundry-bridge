@@ -244,8 +244,8 @@ npm test
 
 MIT. See `LICENSE`.
 
-## Support
+## Donate
 
-If Foundry Codex Bridge helps your local GM workflow, optional support is welcome: [paypal.me/mrpooley92](https://paypal.me/mrpooley92).
+If Foundry Codex Bridge helped your local GM workflow, you can donate through [GitHub Sponsors](https://github.com/sponsors/SpencerZPoole) or [PayPal](https://paypal.me/mrpooley92). GitHub Sponsors is best for recurring sponsorships; PayPal works well for one-time donations.
 
 The bridge remains local-first, open source, and usable without donations.
