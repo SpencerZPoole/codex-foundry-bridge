@@ -1,5 +1,5 @@
 const MODULE_ID = "codex-foundry-bridge";
-const MODULE_VERSION = "0.2.12";
+const MODULE_VERSION = "0.2.13";
 const DEFAULT_URL = "ws://127.0.0.1:30123/foundry";
 const RECONNECT_MS = 5000;
 const MAX_RESULT_CHARS = 1_000_000;
@@ -2412,6 +2412,36 @@ async function handleBridgeRequest(method, args = {}) {
           version: module.version
         }))
       };
+
+    case "lifecycle_capture_state":
+      if (args.worldId && args.worldId !== game.world.id) {
+        throw new Error(`Lifecycle state capture requested ${args.worldId}, but active world is ${game.world.id}.`);
+      }
+      return {
+        worldId: game.world.id,
+        paused: game.paused === true
+      };
+
+    case "lifecycle_restore_state": {
+      if (args.worldId && args.worldId !== game.world.id) {
+        throw new Error(`Lifecycle state restore requested ${args.worldId}, but active world is ${game.world.id}.`);
+      }
+      const desiredPaused = args.pauseState?.paused;
+      if (typeof desiredPaused !== "boolean") {
+        throw new Error("Lifecycle state restore requires pauseState.paused as a boolean.");
+      }
+      const beforePaused = game.paused === true;
+      if (beforePaused !== desiredPaused) {
+        game.togglePause(desiredPaused, { broadcast: true });
+      }
+      return {
+        worldId: game.world.id,
+        beforePaused,
+        desiredPaused,
+        afterPaused: game.paused === true,
+        changed: beforePaused !== (game.paused === true)
+      };
+    }
 
     case "list_collections":
       return collectionEntries();

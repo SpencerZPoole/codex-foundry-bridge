@@ -1,7 +1,7 @@
 {
-  "bridgeVersion": "0.2.12",
+  "bridgeVersion": "0.2.13",
   "registryVersion": 1,
-  "checksum": "5f1bdad1f3e858e239d7d3258119f5c647cbcf9df3d73b8be077580031420be4",
+  "checksum": "dc6d539ecca023f8c87662b94de9dea04528676fa31e6ce7da3a3f49e17c9184",
   "toolCount": 47,
   "fallback": {
     "tool": "call_bridge_tool",
@@ -714,6 +714,9 @@
         "dangerous",
         "gmUserId",
         "loginVisibleApp",
+        "preserveForegroundFocus",
+        "preservePauseState",
+        "preserveWindowState",
         "timeouts",
         "visibleCdpPort",
         "worldId"

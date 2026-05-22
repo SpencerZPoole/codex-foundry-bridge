@@ -406,6 +406,10 @@ try {
     mcpToolList.tools.map((tool) => tool.name).sort(),
     [...registeredToolNames].sort()
   );
+  const restartSchema = mcpToolList.tools.find((tool) => tool.name === "restart_foundry_world")?.inputSchema;
+  assert.equal(restartSchema?.properties?.preserveWindowState?.type, "boolean");
+  assert.equal(restartSchema?.properties?.preservePauseState?.type, "boolean");
+  assert.equal(restartSchema?.properties?.preserveForegroundFocus?.type, "boolean");
 
   const mcpFallbackResult = await withMcpClient((client) => client.callTool({
     name: "call_bridge_tool",

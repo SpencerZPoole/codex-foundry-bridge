@@ -4,7 +4,7 @@ Last verified: 2026-05-21
 
 ## Summary
 
-`FoundryCodexBridge` is currently a strong local-only FoundryVTT control bridge, not just a proof of concept. Version `0.2.12` exposes a shared registry of 47 MCP/daemon tools, supports direct MCP discovery plus `call_bridge_tool` fallback dispatch, includes a guarded local Foundry app lifecycle restart workflow for explicit worlds, adds high-level read-only live-world intelligence, and now supports previewable journal/page, scene token/light/note, typed top-level document, and chat message transactions.
+`FoundryCodexBridge` is currently a strong local-only FoundryVTT control bridge, not just a proof of concept. Version `0.2.13` exposes a shared registry of 47 MCP/daemon tools, supports direct MCP discovery plus `call_bridge_tool` fallback dispatch, includes a guarded local Foundry app lifecycle restart workflow for explicit worlds with visible-window and pause-state preservation, adds high-level read-only live-world intelligence, and now supports previewable journal/page, scene token/light/note, typed top-level document, and chat message transactions.
 
 The v1.0 release goal is **Guarded Power**: expand practical live-project ability substantially while preserving the current safety model: localhost daemon, bridge token, trusted GM session gate, redaction, backups before destructive edits, and explicit `dangerous=true` for raw GM script execution.
 
@@ -22,16 +22,16 @@ This suggests a monetizable lane, but not as "just another Foundry MCP." The bes
 
 ### Verified State
 
-- Bridge/package/module version: `0.2.12`
+- Bridge/package/module version: `0.2.13`
 - Registry version: `1`
-- Registry checksum: `5f1bdad1f3e858e239d7d3258119f5c647cbcf9df3d73b8be077580031420be4`
+- Registry checksum: `dc6d539ecca023f8c87662b94de9dea04528676fa31e6ce7da3a3f49e17c9184`
 - Registered tools: `47`
 - Live validation world: `scratch`
-- Live Foundry: `14.361`
+- Live Foundry: `14.362`
 - Live system: `D35E 3.0.2`
-- Live bridge status: daemon verified at `0.2.12`; `bridge_self_check.ready=true`
-- Live module script version: `0.2.12`
-- Installed module manifest file version: `0.2.12`
+- Live bridge status: `bridge_self_check.ready=true` on `scratch`
+- Live module script version: `0.2.13`
+- Installed module manifest file version: `0.2.13`
 - Trusted GM sessions: `2` after visible Electron GM login plus managed bridge GM client restart validation
 - Runtime event health: no errors; Foundry deprecation warnings only from compatibility/runtime read paths
 - Current self-check action items: none
@@ -59,7 +59,7 @@ The bridge currently provides:
 | World mutation | `create_document`, `update_document`, `create_embedded_document`, `update_embedded_document` | Powerful but low-level |
 | Destructive mutation | `delete_document`, `delete_embedded_document` | Backup-first, still needs rollback browsing/apply metadata |
 | Chat/macros/scripts | `create_chat_message`, `list_chat_targets`, `plan_chat_messages`, `run_macro`, `run_gm_script` | Chat now has a first guarded workflow; macros/scripts remain powerful and `run_gm_script` remains emergency-only |
-| Local lifecycle | `restart_foundry_world` | Guarded full-app restart and GM auto-login for explicit trusted worlds |
+| Local lifecycle | `restart_foundry_world` | Guarded full-app restart and GM auto-login for explicit trusted worlds; `0.2.13` adds best-effort visible-window preservation and pause-state restore |
 | Local maintenance | `list_installed_packages`, `read_foundry_options_sanitized`, `list_trusted_worlds`, `revoke_trusted_world`, `backup_world`, `install_or_update_bridge_module` | Practical local ops baseline |
 
 ### Strengths
@@ -114,13 +114,26 @@ For v1.0, document and preserve:
 
 ### Lifecycle Hardening Slice
 
-Status: expanded for the `0.2.7` development slice.
+Status: expanded for the `0.2.7` development slice and hardened again in `0.2.13`.
 
 The `restart_foundry_world` tool is a guarded local lifecycle orchestrator, not a live-world mutation tool. It requires `dangerous=true`, an explicit `worldId`, and Windows Credential Manager credentials when Foundry administrator or GM passwords are configured. It preserves localhost, token auth, redaction, and trusted-world requirements: after restart, live-world tools become ready only if the launched world is already trusted.
 
 The `0.2.7` slice changes the lifecycle end state from headless-only bridge recovery to visible-app plus bridge recovery. The daemon now launches the visible Electron app with a dedicated CDP port, drives it into the requested world as GM, and still maintains a separate managed GM client for reliable bridge connectivity. The module also exposes a GM-only lifecycle credential wizard that stores admin and per-world GM secrets through the localhost daemon into Windows Credential Manager.
 
-Live findings from the `scratch` validation pass:
+The `0.2.13` slice preserves the visible Electron window's monitor, bounds, and normal/maximized/minimized state across restart on Windows, skips the headless viewport override for the visible app, keeps the fixed headless viewport for the managed bridge GM client, and preserves `game.paused` when a trusted same-world GM session exists before restart.
+
+Latest live findings from the `scratch` `0.2.13` validation pass:
+
+- Confirmed `restart_foundry_world({ worldId: "scratch", dangerous: true })` succeeded after full app stop/start, visible app GM login, managed bridge GM login, bridge readiness verification, pause restore, and final window restore.
+- Confirmed visible-window snapshot captured the Foundry app on a non-primary monitor in maximized state and restored it before login and again after bridge verification.
+- Confirmed visible app CDP login no longer receives `Emulation.setDeviceMetricsOverride`; visible viewport diagnostics reported a real-window-sized viewport around `1920x1057` instead of the managed `1280x900`.
+- Confirmed the managed bridge GM client still receives the fixed `1280x900` viewport override for automation stability.
+- Confirmed pause preservation captured `scratch` as paused and restored/verified paused state after restart.
+- Fixed a live restart issue where stale Edge processes using the bridge's dedicated browser profile could keep an old CDP port alive and prevent the managed GM client from opening the requested `bridgeCdpPort`.
+- Confirmed post-restart `bridge_self_check.ready=true`, active world `scratch`, Foundry `14.362`, D35E `3.0.2`, module/script/manifest version `0.2.13`, and registry checksum `dc6d539ecca023f8c87662b94de9dea04528676fa31e6ce7da3a3f49e17c9184`.
+- Current validation target: `scratch` only. Do not use a private production campaign world for this lifecycle validation unless explicitly requested by exact world id.
+
+Earlier live findings from the `scratch` `0.2.7` validation pass:
 
 - Confirmed `restart_foundry_world({ worldId: "scratch", dangerous: true })` fully stopped Foundry, relaunched the Electron app with `--remote-debugging-port=39224`, launched `scratch`, joined the visible app as GM at `/game`, joined the managed bridge GM client, and verified `bridge_self_check.ready=true`.
 - Confirmed registry checksum `9aef8618dbcc034a1acef03cbfd3ffda4b0041325b7d75c5ff4931456204725e` matches the live daemon, tool list, fallback dispatch, and committed capability manifest.

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
-export const BRIDGE_VERSION = "0.2.12";
+export const BRIDGE_VERSION = "0.2.13";
 export const TOOL_REGISTRY_VERSION = 1;
 
 const AnyJson = z.any().optional();
@@ -615,6 +615,9 @@ export const TOOL_DEFINITIONS = [
       dangerous: z.boolean(),
       loginVisibleApp: z.boolean().optional(),
       allowHeadlessOnlyFallback: z.boolean().optional(),
+      preserveWindowState: z.boolean().optional(),
+      preservePauseState: z.boolean().optional(),
+      preserveForegroundFocus: z.boolean().optional(),
       bridgeCdpPort: z.number().optional(),
       visibleCdpPort: z.number().optional(),
       timeouts: z.object({

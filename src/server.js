@@ -107,6 +107,8 @@ function lifecycleContext(extra = {}) {
     bridgeHost: BRIDGE_HOST,
     bridgePort: BRIDGE_PORT,
     bridgeToken: BRIDGE_TOKEN,
+    captureLifecycleState,
+    restoreLifecycleState,
     ...extra
   };
 }
@@ -577,6 +579,16 @@ function activeSession() {
   return null;
 }
 
+function activeSessionForWorld(worldId) {
+  const normalizedWorldId = normalizeWorldId(worldId);
+  for (const session of sessions) {
+    if (isTrustedSession(session) && normalizeWorldId(session.hello?.worldId) === normalizedWorldId) {
+      return session;
+    }
+  }
+  return null;
+}
+
 function activeWorldId() {
   return activeSession()?.hello?.worldId ?? null;
 }
@@ -587,8 +599,8 @@ function pendingAuthorizationSessions() {
     .map((session) => session.hello);
 }
 
-function sendFoundryRequest(method, args = {}, { requireConnected = true } = {}) {
-  const session = activeSession();
+function sendFoundryRequest(method, args = {}, { requireConnected = true, worldId = null } = {}) {
+  const session = worldId ? activeSessionForWorld(worldId) : activeSession();
   if (!session) {
     if (requireConnected) {
       throw new Error("No connected trusted GM Foundry bridge session. Open the world as GM, activate the module, set the bridge token, and authorize this world.");
@@ -606,6 +618,27 @@ function sendFoundryRequest(method, args = {}, { requireConnected = true } = {})
     pending.set(id, { resolve, reject, timer });
     session.ws.send(JSON.stringify({ type: "request", id, method, args }));
   });
+}
+
+function captureLifecycleState({ worldId }) {
+  const normalizedWorldId = normalizeWorldId(worldId);
+  if (!activeSessionForWorld(normalizedWorldId)) {
+    return {
+      skipped: true,
+      reason: "no-trusted-same-world-session",
+      worldId: normalizedWorldId
+    };
+  }
+  return sendFoundryRequest("lifecycle_capture_state", { worldId: normalizedWorldId }, { worldId: normalizedWorldId });
+}
+
+function restoreLifecycleState({ worldId, pauseState }) {
+  const normalizedWorldId = normalizeWorldId(worldId);
+  return sendFoundryRequest(
+    "lifecycle_restore_state",
+    { worldId: normalizedWorldId, pauseState },
+    { worldId: normalizedWorldId }
+  );
 }
 
 function assertLifecycleSession(session, message) {

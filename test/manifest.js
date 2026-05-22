@@ -127,6 +127,14 @@ const applyPlanTool = manifest.tools.find((entry) => entry.name === "apply_bridg
 assert.equal(applyPlanTool.risk, "write");
 assert.equal(applyPlanTool.readOnly, false);
 
+const restartTool = manifest.tools.find((entry) => entry.name === "restart_foundry_world");
+assert.equal(restartTool.category, "lifecycle");
+assert.equal(restartTool.risk, "dangerous-local-lifecycle");
+assert.equal(restartTool.requiresTrustedSession, false);
+for (const key of ["preserveWindowState", "preservePauseState", "preserveForegroundFocus"]) {
+  assert.ok(restartTool.inputKeys.includes(key), `restart_foundry_world missing ${key}`);
+}
+
 for (const name of chatWorkflowTools) {
   const tool = manifest.tools.find((entry) => entry.name === name);
   assert.ok(tool, `Manifest missing chat workflow tool: ${name}`);

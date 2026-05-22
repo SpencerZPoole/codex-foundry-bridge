@@ -111,6 +111,9 @@ function resolveLifecycleConfig(args, context) {
     visibleCdpPort: Number(args.visibleCdpPort ?? fileConfig.visibleCdpPort ?? DEFAULT_VISIBLE_CDP_PORT),
     loginVisibleApp: args.loginVisibleApp ?? fileConfig.loginVisibleApp ?? true,
     allowHeadlessOnlyFallback: Boolean(args.allowHeadlessOnlyFallback ?? fileConfig.allowHeadlessOnlyFallback),
+    preserveWindowState: args.preserveWindowState ?? fileConfig.preserveWindowState ?? true,
+    preservePauseState: args.preservePauseState ?? fileConfig.preservePauseState ?? true,
+    preserveForegroundFocus: args.preserveForegroundFocus ?? fileConfig.preserveForegroundFocus ?? true,
     browserExecutable,
     browserProfile,
     adminCredentialTarget: args.adminCredentialTarget ?? fileConfig.credentials?.adminTarget ?? DEFAULT_ADMIN_CREDENTIAL_TARGET,
@@ -161,6 +164,24 @@ async function runPhase(result, name, fn) {
       error: error instanceof Error ? error.message : String(error)
     });
     throw error;
+  }
+}
+
+async function runOptionalPhase(result, name, fn) {
+  const started = Date.now();
+  try {
+    const value = await fn();
+    result.phases.push({
+      name,
+      ok: true,
+      skipped: value?.skipped === true,
+      ms: Date.now() - started
+    });
+    return value;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    result.phases.push({ name, ok: true, skipped: true, ms: Date.now() - started, reason });
+    return { skipped: true, reason };
   }
 }
 
@@ -263,6 +284,33 @@ foreach ($id in $ids) {
   await execFileAsync("powershell", ["-NoProfile", "-Command", command], { windowsHide: true });
 }
 
+async function defaultClearBrowserProfileProcesses(browserProfile) {
+  if (process.platform !== "win32") return { skipped: true, reason: "browser-profile-cleanup-supported-on-windows-only" };
+  const command = `
+$ErrorActionPreference = "Stop"
+$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json
+$target = [System.IO.Path]::GetFullPath([string]$payload.browserProfile).TrimEnd("\\")
+$processes = Get-CimInstance Win32_Process | Where-Object {
+  $_.CommandLine -and
+  ($_.Name -in @("chrome.exe", "msedge.exe")) -and
+  ($_.CommandLine.IndexOf("--user-data-dir", [StringComparison]::OrdinalIgnoreCase) -ge 0) -and
+  ($_.CommandLine.IndexOf($target, [StringComparison]::OrdinalIgnoreCase) -ge 0)
+}
+$killed = @()
+foreach ($process in $processes) {
+  Stop-Process -Id ([int]$process.ProcessId) -Force -ErrorAction SilentlyContinue
+  $killed += [int]$process.ProcessId
+}
+[pscustomobject]@{
+  skipped = $false
+  profile = $target
+  killed = $killed.Count
+  processIds = $killed
+} | ConvertTo-Json -Depth 4
+`;
+  return runPowerShellJson(command, { browserProfile });
+}
+
 function defaultLaunchFoundryProcess(executablePath, launchArgs = []) {
   const child = spawn(executablePath, launchArgs, {
     detached: true,
@@ -362,6 +410,252 @@ function runPowerShellWithJson(command, payload = {}) {
   });
 }
 
+async function runPowerShellJson(command, payload = {}) {
+  const stdout = await runPowerShellWithJson(command, payload);
+  const trimmed = stdout.trim();
+  return trimmed ? JSON.parse(trimmed) : {};
+}
+
+function skippedWindowState(reason) {
+  return { supported: process.platform === "win32", found: false, skipped: true, reason };
+}
+
+async function defaultSnapshotFoundryWindow(executablePath) {
+  if (process.platform !== "win32") return skippedWindowState("window-state-preservation-supported-on-windows-only");
+  const command = `
+$ErrorActionPreference = "Stop"
+$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class FoundryBridgeWindow {
+  [StructLayout(LayoutKind.Sequential)]
+  public struct POINT {
+    public int x;
+    public int y;
+  }
+  [StructLayout(LayoutKind.Sequential)]
+  public struct RECT {
+    public int Left;
+    public int Top;
+    public int Right;
+    public int Bottom;
+  }
+  [StructLayout(LayoutKind.Sequential)]
+  public struct WINDOWPLACEMENT {
+    public int length;
+    public int flags;
+    public int showCmd;
+    public POINT ptMinPosition;
+    public POINT ptMaxPosition;
+    public RECT rcNormalPosition;
+  }
+  [StructLayout(LayoutKind.Sequential)]
+  public struct MONITORINFO {
+    public int cbSize;
+    public RECT rcMonitor;
+    public RECT rcWork;
+    public int dwFlags;
+  }
+  [DllImport("user32.dll", SetLastError = true)]
+  public static extern bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
+  [DllImport("user32.dll", SetLastError = true)]
+  public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+  [DllImport("user32.dll")]
+  public static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
+  [DllImport("user32.dll", SetLastError = true)]
+  public static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+  [DllImport("user32.dll")]
+  public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll", SetLastError = true)]
+  public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+}
+"@
+function Convert-Rect($rect) {
+  [pscustomobject]@{
+    left = $rect.Left
+    top = $rect.Top
+    right = $rect.Right
+    bottom = $rect.Bottom
+    width = $rect.Right - $rect.Left
+    height = $rect.Bottom - $rect.Top
+  }
+}
+function Show-State($showCmd) {
+  if ($showCmd -in @(2, 6, 7)) { return "minimized" }
+  if ($showCmd -eq 3) { return "maximized" }
+  return "normal"
+}
+$target = [System.IO.Path]::GetFullPath([string]$payload.executablePath)
+$processes = Get-CimInstance Win32_Process | Where-Object {
+  $_.ExecutablePath -and ([System.IO.Path]::GetFullPath($_.ExecutablePath) -ieq $target)
+}
+$candidates = @()
+foreach ($candidate in $processes) {
+  $process = Get-Process -Id $candidate.ProcessId -ErrorAction SilentlyContinue
+  if ($process -and $process.MainWindowHandle -ne 0) { $candidates += $process }
+}
+if ($candidates.Count -eq 0) {
+  [pscustomobject]@{ supported = $true; found = $false; skipped = $true; reason = "foundry-window-not-found" } | ConvertTo-Json -Depth 6
+  exit 0
+}
+$process = $candidates | Select-Object -First 1
+$hwnd = [IntPtr]$process.MainWindowHandle
+$placement = New-Object FoundryBridgeWindow+WINDOWPLACEMENT
+$placement.length = [Runtime.InteropServices.Marshal]::SizeOf([type][FoundryBridgeWindow+WINDOWPLACEMENT])
+if (-not [FoundryBridgeWindow]::GetWindowPlacement($hwnd, [ref]$placement)) {
+  $errorCode = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+  throw "GetWindowPlacement failed with Win32 error $errorCode."
+}
+$currentRect = New-Object FoundryBridgeWindow+RECT
+[FoundryBridgeWindow]::GetWindowRect($hwnd, [ref]$currentRect) | Out-Null
+$monitorHandle = [FoundryBridgeWindow]::MonitorFromWindow($hwnd, 2)
+$monitorInfo = New-Object FoundryBridgeWindow+MONITORINFO
+$monitorInfo.cbSize = [Runtime.InteropServices.Marshal]::SizeOf([type][FoundryBridgeWindow+MONITORINFO])
+$monitor = $null
+if ($monitorHandle -ne [IntPtr]::Zero -and [FoundryBridgeWindow]::GetMonitorInfo($monitorHandle, [ref]$monitorInfo)) {
+  $monitor = [pscustomobject]@{
+    handle = $monitorHandle.ToInt64()
+    bounds = Convert-Rect $monitorInfo.rcMonitor
+    workArea = Convert-Rect $monitorInfo.rcWork
+    primary = (($monitorInfo.dwFlags -band 1) -eq 1)
+  }
+}
+$foregroundHandle = [FoundryBridgeWindow]::GetForegroundWindow()
+$foregroundProcessId = 0
+$foreground = $null
+if ($foregroundHandle -ne [IntPtr]::Zero) {
+  [FoundryBridgeWindow]::GetWindowThreadProcessId($foregroundHandle, [ref]$foregroundProcessId) | Out-Null
+  $foregroundProcess = Get-Process -Id $foregroundProcessId -ErrorAction SilentlyContinue
+  $foreground = [pscustomobject]@{
+    handle = $foregroundHandle.ToInt64()
+    processId = $foregroundProcessId
+    title = if ($foregroundProcess) { $foregroundProcess.MainWindowTitle } else { "" }
+    isFoundry = ($foregroundProcessId -eq $process.Id)
+  }
+}
+[pscustomobject]@{
+  supported = $true
+  found = $true
+  skipped = $false
+  processId = $process.Id
+  title = $process.MainWindowTitle
+  handle = $hwnd.ToInt64()
+  showCmd = $placement.showCmd
+  state = Show-State $placement.showCmd
+  normalBounds = Convert-Rect $placement.rcNormalPosition
+  currentBounds = Convert-Rect $currentRect
+  monitor = $monitor
+  foreground = $foreground
+} | ConvertTo-Json -Depth 8
+`;
+  return runPowerShellJson(command, { executablePath });
+}
+
+async function defaultRestoreFoundryWindow(executablePath, snapshot, options = {}) {
+  if (process.platform !== "win32") return skippedWindowState("window-state-preservation-supported-on-windows-only");
+  if (!snapshot?.found || snapshot.skipped) {
+    return {
+      supported: true,
+      restored: false,
+      skipped: true,
+      reason: snapshot?.reason ?? "window-state-not-captured"
+    };
+  }
+  const command = `
+$ErrorActionPreference = "Stop"
+$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class FoundryBridgeWindowRestore {
+  [StructLayout(LayoutKind.Sequential)]
+  public struct RECT {
+    public int Left;
+    public int Top;
+    public int Right;
+    public int Bottom;
+  }
+  [DllImport("user32.dll", SetLastError = true)]
+  public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+  [DllImport("user32.dll")]
+  public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+  [DllImport("user32.dll")]
+  public static extern bool SetForegroundWindow(IntPtr hWnd);
+}
+"@
+$target = [System.IO.Path]::GetFullPath([string]$payload.executablePath)
+$processes = Get-CimInstance Win32_Process | Where-Object {
+  $_.ExecutablePath -and ([System.IO.Path]::GetFullPath($_.ExecutablePath) -ieq $target)
+}
+$windowProcess = $null
+foreach ($candidate in $processes) {
+  $process = Get-Process -Id $candidate.ProcessId -ErrorAction SilentlyContinue
+  if ($process -and $process.MainWindowHandle -ne 0) {
+    $windowProcess = $process
+    break
+  }
+}
+if (-not $windowProcess) {
+  [pscustomobject]@{ supported = $true; restored = $false; skipped = $true; reason = "foundry-window-not-found" } | ConvertTo-Json -Depth 6
+  exit 0
+}
+$bounds = $payload.snapshot.normalBounds
+if (-not $bounds) { $bounds = $payload.snapshot.currentBounds }
+if (-not $bounds) {
+  [pscustomobject]@{ supported = $true; restored = $false; skipped = $true; reason = "window-bounds-not-captured" } | ConvertTo-Json -Depth 6
+  exit 0
+}
+$hwnd = [IntPtr]$windowProcess.MainWindowHandle
+$desiredState = [string]$payload.snapshot.state
+if (-not $payload.final -and $desiredState -eq "minimized") { $desiredState = "normal" }
+[FoundryBridgeWindowRestore]::ShowWindow($hwnd, 9) | Out-Null
+[FoundryBridgeWindowRestore]::SetWindowPos(
+  $hwnd,
+  [IntPtr]::Zero,
+  [int]$bounds.left,
+  [int]$bounds.top,
+  [int]$bounds.width,
+  [int]$bounds.height,
+  0x0040
+) | Out-Null
+if ($desiredState -eq "maximized") {
+  [FoundryBridgeWindowRestore]::ShowWindow($hwnd, 3) | Out-Null
+} elseif ($desiredState -eq "minimized") {
+  [FoundryBridgeWindowRestore]::ShowWindow($hwnd, 6) | Out-Null
+} else {
+  [FoundryBridgeWindowRestore]::ShowWindow($hwnd, 1) | Out-Null
+}
+$foregroundRestoreAttempted = $false
+$foregroundRestored = $false
+if ($payload.preserveForegroundFocus -and $payload.snapshot.foreground -and -not $payload.snapshot.foreground.isFoundry) {
+  $foregroundHandle = [IntPtr][int64]$payload.snapshot.foreground.handle
+  if ($foregroundHandle -ne [IntPtr]::Zero) {
+    $foregroundRestoreAttempted = $true
+    $foregroundRestored = [FoundryBridgeWindowRestore]::SetForegroundWindow($foregroundHandle)
+  }
+}
+[pscustomobject]@{
+  supported = $true
+  restored = $true
+  skipped = $false
+  final = [bool]$payload.final
+  state = $desiredState
+  processId = $windowProcess.Id
+  title = $windowProcess.MainWindowTitle
+  bounds = $bounds
+  foregroundRestoreAttempted = $foregroundRestoreAttempted
+  foregroundRestored = $foregroundRestored
+} | ConvertTo-Json -Depth 8
+`;
+  return runPowerShellJson(command, {
+    executablePath,
+    snapshot,
+    final: options.final === true,
+    preserveForegroundFocus: options.preserveForegroundFocus === true
+  });
+}
+
 async function defaultWriteCredential(target, password, userName = "FoundryCodexBridge") {
   if (process.platform !== "win32") {
     throw new Error("Windows Credential Manager is only supported on Windows.");
@@ -456,6 +750,9 @@ function createDefaultLifecycleDeps() {
     listFoundryProcesses: defaultListFoundryProcesses,
     forceKillProcesses: defaultForceKillProcesses,
     launchFoundryProcess: defaultLaunchFoundryProcess,
+    clearBrowserProfileProcesses: defaultClearBrowserProfileProcesses,
+    snapshotFoundryWindow: defaultSnapshotFoundryWindow,
+    restoreFoundryWindow: defaultRestoreFoundryWindow,
     readCredential: defaultReadCredential,
     writeCredential: defaultWriteCredential,
     deleteCredential: defaultDeleteCredential,
@@ -750,9 +1047,10 @@ async function ensureCdpBrowser(config, deps) {
     await waitForCdp(config, deps, 1000);
     return { reused: true, pid: null };
   } catch {
+    const profileCleanup = await deps.clearBrowserProfileProcesses?.(config.browserProfile);
     const pid = launchBrowser(config);
     await waitForCdp(config, deps);
-    return { reused: false, pid };
+    return { reused: false, pid, profileCleanup };
   }
 }
 
@@ -822,13 +1120,26 @@ async function seedClientSettings(cdp, config) {
   }, { bridgeToken: config.bridgeToken, bridgeUrl: config.bridgeUrl });
 }
 
-async function joinGmThroughCdp(config, deps, { worldId, gmUserId, gmPassword, webSocketDebuggerUrl, browser = null, visible = false, initialTarget = null }) {
+async function joinGmThroughCdp(config, deps, {
+  worldId,
+  gmUserId,
+  gmPassword,
+  webSocketDebuggerUrl,
+  browser = null,
+  visible = false,
+  initialTarget = null,
+  applyViewportOverride = true
+}) {
   const cdp = new CdpClient(webSocketDebuggerUrl);
   await cdp.open();
   try {
     await cdp.send("Page.enable");
     await cdp.send("Runtime.enable");
-    await cdp.send("Emulation.setDeviceMetricsOverride", GM_CLIENT_VIEWPORT);
+    if (applyViewportOverride) {
+      await cdp.send("Emulation.setDeviceMetricsOverride", GM_CLIENT_VIEWPORT);
+    } else {
+      await cdp.send("Emulation.clearDeviceMetricsOverride").catch(() => null);
+    }
     await navigate(cdp, deps, `${config.foundryUrl}/join`);
     await seedClientSettings(cdp, config);
     const joinResult = await evaluate(cdp, async ({ userId, password }) => {
@@ -872,6 +1183,18 @@ async function joinGmThroughCdp(config, deps, { worldId, gmUserId, gmPassword, w
       await globalThis.CodexFoundryBridge.setToken(bridgeToken);
       return globalThis.CodexFoundryBridge.status();
     }, { bridgeToken: config.bridgeToken });
+    const viewport = await evaluate(cdp, () => ({
+      innerWidth: window.innerWidth,
+      innerHeight: window.innerHeight,
+      outerWidth: window.outerWidth,
+      outerHeight: window.outerHeight,
+      screenX: window.screenX,
+      screenY: window.screenY,
+      devicePixelRatio: window.devicePixelRatio
+    })).catch((error) => ({
+      unavailable: true,
+      error: error instanceof Error ? error.message : String(error)
+    }));
     return {
       browser,
       visible,
@@ -879,6 +1202,8 @@ async function joinGmThroughCdp(config, deps, { worldId, gmUserId, gmPassword, w
       worldId,
       gmUserId,
       moduleEnabledDuringRun: moduleState.changed,
+      viewport,
+      viewportOverrideApplied: applyViewportOverride,
       bridgeStatus
     };
   } finally {
@@ -895,11 +1220,12 @@ async function joinGmClientWithCdp(config, deps, { worldId, gmUserId, gmPassword
     gmPassword,
     webSocketDebuggerUrl,
     browser,
-    visible: false
+    visible: false,
+    applyViewportOverride: true
   });
 }
 
-async function joinVisibleAppWithCdp(config, deps, { worldId, gmUserId, gmPassword }) {
+async function joinVisibleAppWithCdp(config, deps, { worldId, gmUserId, gmPassword, applyViewportOverride = false }) {
   const target = await visibleAppTarget(config, deps);
   return joinGmThroughCdp(config, deps, {
     worldId,
@@ -908,7 +1234,8 @@ async function joinVisibleAppWithCdp(config, deps, { worldId, gmUserId, gmPasswo
     webSocketDebuggerUrl: target.webSocketDebuggerUrl,
     browser: { reused: true, pid: null, cdpPort: config.visibleCdpPort },
     visible: true,
-    initialTarget: { reused: target.reused, url: target.url }
+    initialTarget: { reused: target.reused, url: target.url },
+    applyViewportOverride
   });
 }
 
@@ -1048,6 +1375,80 @@ export async function storeLifecycleCredentials(args = {}, context = {}, injecte
   }, deps);
 }
 
+async function captureLifecycleState(config, context, worldId) {
+  if (config.preservePauseState === false) {
+    return { skipped: true, reason: "preservePauseState=false", worldId };
+  }
+  if (typeof context.captureLifecycleState !== "function") {
+    return { skipped: true, reason: "lifecycle-state-capture-unavailable", worldId };
+  }
+  const state = await context.captureLifecycleState({ worldId });
+  if (!state || state.skipped) {
+    return {
+      skipped: true,
+      reason: state?.reason ?? "pause-state-unavailable",
+      worldId
+    };
+  }
+  if (state.worldId !== worldId) {
+    return {
+      skipped: true,
+      reason: `captured pause state for ${state.worldId ?? "unknown"} instead of ${worldId}`,
+      worldId
+    };
+  }
+  if (typeof state.paused !== "boolean") {
+    return { skipped: true, reason: "captured pause state did not include a boolean paused value", worldId };
+  }
+  return {
+    captured: true,
+    worldId,
+    paused: state.paused
+  };
+}
+
+async function restoreLifecycleState(context, worldId, state) {
+  if (!state?.captured) {
+    return { skipped: true, reason: state?.reason ?? "pause-state-not-captured", worldId };
+  }
+  if (typeof context.restoreLifecycleState !== "function") {
+    throw new Error("lifecycle-state-restore-unavailable");
+  }
+  const restored = await context.restoreLifecycleState({
+    worldId,
+    pauseState: {
+      worldId,
+      paused: state.paused
+    }
+  });
+  if (restored?.worldId !== worldId) {
+    throw new Error(`Restored pause state for ${restored?.worldId ?? "unknown"} instead of ${worldId}`);
+  }
+  if (restored.afterPaused !== state.paused) {
+    throw new Error(`Pause restore verification failed: expected ${state.paused}, got ${restored.afterPaused}`);
+  }
+  return restored;
+}
+
+function windowPreservationEnabled(config) {
+  return config.preserveWindowState !== false && config.loginVisibleApp !== false;
+}
+
+async function restoreWindowState(config, deps, snapshot, options = {}) {
+  if (!snapshot?.found || snapshot.skipped) {
+    return {
+      supported: snapshot?.supported ?? process.platform === "win32",
+      restored: false,
+      skipped: true,
+      reason: snapshot?.reason ?? "window-state-not-captured"
+    };
+  }
+  return deps.restoreFoundryWindow(config.foundryExecutable, snapshot, {
+    final: options.final === true,
+    preserveForegroundFocus: config.preserveForegroundFocus !== false
+  });
+}
+
 export async function restartFoundryWorld(args = {}, context = {}, injectedDeps = {}) {
   if (args.dangerous !== true) throw new Error("restart_foundry_world requires dangerous=true");
   const worldId = normalizeWorldId(args.worldId);
@@ -1085,8 +1486,38 @@ export async function restartFoundryWorld(args = {}, context = {}, injectedDeps 
     visibleAppLoginRequired: config.loginVisibleApp !== false && !config.allowHeadlessOnlyFallback,
     visibleCdpPort: config.loginVisibleApp === false ? null : config.visibleCdpPort,
     bridgeCdpPort: config.bridgeCdpPort,
+    windowState: {
+      preserve: windowPreservationEnabled(config),
+      preserveForegroundFocus: config.preserveForegroundFocus !== false
+    },
+    pauseState: {
+      preserve: config.preservePauseState !== false
+    },
     phases: []
   };
+
+  if (windowPreservationEnabled(config)) {
+    result.windowState.snapshot = await runOptionalPhase(
+      result,
+      "snapshot_window_state",
+      () => deps.snapshotFoundryWindow(config.foundryExecutable)
+    );
+  } else {
+    result.windowState.snapshot = {
+      skipped: true,
+      reason: config.loginVisibleApp === false ? "loginVisibleApp=false" : "preserveWindowState=false"
+    };
+  }
+
+  if (config.preservePauseState !== false) {
+    result.pauseState.snapshot = await runOptionalPhase(
+      result,
+      "snapshot_pause_state",
+      () => captureLifecycleState(config, context, worldId)
+    );
+  } else {
+    result.pauseState.snapshot = { skipped: true, reason: "preservePauseState=false", worldId };
+  }
 
   result.stop = await runPhase(result, "stop_foundry", () => stopFoundry(config, deps, adminPassword, adminRequired));
   result.start = await runPhase(result, "start_foundry", async () => {
@@ -1095,13 +1526,21 @@ export async function restartFoundryWorld(args = {}, context = {}, injectedDeps 
     const status = await waitForFoundryHttp(config, deps);
     return { ...launch, launchArgs, status };
   });
+  if (windowPreservationEnabled(config)) {
+    result.windowState.preLoginRestore = await runOptionalPhase(
+      result,
+      "restore_window_state_before_login",
+      () => restoreWindowState(config, deps, result.windowState.snapshot, { final: false })
+    );
+  }
   result.launchWorld = await runPhase(result, "launch_world", () => launchWorld(config, deps, worldId, adminPassword, adminRequired));
   if (config.loginVisibleApp !== false) {
     try {
       result.visibleApp = await runPhase(result, "join_visible_app", () => deps.joinVisibleApp(config, deps, {
         worldId,
         gmUserId: config.gmUserId,
-        gmPassword
+        gmPassword,
+        applyViewportOverride: false
       }));
     } catch (error) {
       if (!config.allowHeadlessOnlyFallback) throw error;
@@ -1117,9 +1556,30 @@ export async function restartFoundryWorld(args = {}, context = {}, injectedDeps 
   result.joinGm = await runPhase(result, "join_gm_client", () => deps.joinGmClient(config, deps, {
     worldId,
     gmUserId: config.gmUserId,
-    gmPassword
+    gmPassword,
+    applyViewportOverride: true
   }));
   result.bridge = await runPhase(result, "verify_bridge_ready", () => pollBridgeReady(config, deps, worldId));
+  if (result.pauseState.snapshot?.captured) {
+    result.pauseState.restore = await runPhase(
+      result,
+      "restore_pause_state",
+      () => restoreLifecycleState(context, worldId, result.pauseState.snapshot)
+    );
+  } else {
+    result.pauseState.restore = {
+      skipped: true,
+      reason: result.pauseState.snapshot?.reason ?? "pause-state-not-captured",
+      worldId
+    };
+  }
+  if (windowPreservationEnabled(config)) {
+    result.windowState.finalRestore = await runOptionalPhase(
+      result,
+      "restore_window_state_after_login",
+      () => restoreWindowState(config, deps, result.windowState.snapshot, { final: true })
+    );
+  }
   result.ok = true;
   return result;
 }

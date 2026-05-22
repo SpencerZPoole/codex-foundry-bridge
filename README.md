@@ -23,11 +23,11 @@ The project direction is **Guarded Power**: expose useful live-world capability 
 - Read-only world intelligence for compendiums, actors, scenes, world search, readiness audits, and runtime timeline.
 - Preview/apply transactions for journals, scene prep, top-level documents, and chat messages.
 - Backup-first destructive document operations.
-- Guarded local lifecycle restart that can relaunch Foundry, join an explicit world as GM, and restore bridge readiness.
+- Guarded local lifecycle restart that can relaunch Foundry, join an explicit world as GM, preserve visible-window/pause state, and restore bridge readiness.
 
 ## Current Status
 
-- Version: `0.2.12`
+- Version: `0.2.13`
 - Foundry compatibility target: Foundry `14`
 - Live validation baseline: Foundry `14.361` with D35E `3.0.2`
 - Registered tools: `47`
@@ -186,6 +186,10 @@ Document plans currently cover top-level Actor, Item, Scene, and Folder create/u
 
 `restart_foundry_world` is a local lifecycle tool for recovering the bridge when Foundry must fully quit and relaunch. It is separate from live-world tools because the GM websocket is gone while Foundry is closed.
 
+On Windows, restart preserves the visible Foundry Electron window's monitor, bounds, and normal/maximized/minimized state by default. It also snapshots `game.paused` before shutdown when a trusted same-world GM bridge session is connected, then restores that paused/unpaused state after the world is back and bridge-ready. Window restore is best-effort and reported in the result; pause restore is strict once a pause snapshot was captured.
+
+The visible Electron app is driven without the managed headless viewport override, so the app should render to its real window size. The separate managed bridge GM client still uses a fixed headless viewport for reliable automation. If an older managed browser instance is still holding the bridge's dedicated browser profile, the lifecycle launcher clears only those profile-scoped Edge/Chrome processes before starting the requested CDP port.
+
 Configure non-secret lifecycle settings and Windows Credential Manager secrets with:
 
 ```powershell
@@ -207,6 +211,8 @@ Example fallback call:
 ```json
 { "method": "restart_foundry_world", "args": { "worldId": "scratch", "dangerous": true } }
 ```
+
+Optional lifecycle quality-of-life flags default to `true`: `preserveWindowState`, `preservePauseState`, and `preserveForegroundFocus`. Set one to `false` only when troubleshooting local window automation or intentionally changing the paused state during restart.
 
 If the module cannot be enabled from the Foundry UI, close Foundry completely and run the offline helper with an explicit world id:
 

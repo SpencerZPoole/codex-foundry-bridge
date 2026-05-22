@@ -201,6 +201,29 @@ function createDeps(state, credentials) {
       state.activeWorld = null;
       return { pid: 2002 };
     },
+    snapshotFoundryWindow: async () => {
+      state.windowSnapshotCalls += 1;
+      return state.windowSnapshot ?? {
+        supported: true,
+        found: false,
+        skipped: true,
+        reason: "foundry-window-not-found"
+      };
+    },
+    restoreFoundryWindow: async (executablePath, snapshot, options = {}) => {
+      state.windowRestores.push({ snapshot, options });
+      if (!snapshot?.found) {
+        return { restored: false, skipped: true, reason: snapshot?.reason ?? "window-state-not-captured" };
+      }
+      const stateName = !options.final && snapshot.state === "minimized" ? "normal" : snapshot.state;
+      return {
+        restored: true,
+        skipped: false,
+        final: options.final === true,
+        state: stateName,
+        foregroundRestoreAttempted: options.preserveForegroundFocus === true && snapshot.foreground?.isFoundry === false
+      };
+    },
     readCredential: async (target) => credentials.get(target) ?? null,
     credentialSupported: true,
     writeCredential: async (target, password, userName) => {
@@ -211,21 +234,26 @@ function createDeps(state, credentials) {
       const deleted = credentials.delete(target);
       return { target, deleted, supported: true };
     },
-    joinVisibleApp: async (config, deps, { gmUserId: userId, gmPassword }) => {
+    joinVisibleApp: async (config, deps, { gmUserId: userId, gmPassword, applyViewportOverride }) => {
       if (state.visibleJoinFails) throw new Error("visible app login failed");
       assert.equal(userId, gmUserId);
       assert.equal(gmPassword, state.expectedGmPassword);
+      assert.equal(applyViewportOverride, false);
+      state.visibleViewportOverride = applyViewportOverride;
       state.visibleJoinedGmUser = userId;
       return {
         visible: true,
+        viewportOverrideApplied: applyViewportOverride,
         worldId: state.activeWorld,
         gmUserId: userId,
         bridgeStatus: { world: { id: state.activeWorld } }
       };
     },
-    joinGmClient: async (config, deps, { gmUserId: userId, gmPassword }) => {
+    joinGmClient: async (config, deps, { gmUserId: userId, gmPassword, applyViewportOverride }) => {
       assert.equal(userId, gmUserId);
       assert.equal(gmPassword, state.expectedGmPassword);
+      assert.equal(applyViewportOverride, true);
+      state.headlessViewportOverride = applyViewportOverride;
       state.joinedGmUser = userId;
       state.bridgeReady = true;
       return {
@@ -245,6 +273,18 @@ async function runRestart({
   staleDataLock = false,
   credentials = new Map(),
   visibleJoinFails = false,
+  windowSnapshot = {
+    supported: true,
+    found: true,
+    skipped: false,
+    state: "normal",
+    normalBounds: { left: 100, top: 200, width: 1200, height: 800 },
+    currentBounds: { left: 100, top: 200, width: 1200, height: 800 },
+    foreground: { handle: 9009, isFoundry: false }
+  },
+  noPauseSession = false,
+  prePaused = false,
+  pauseRestoreFails = false,
   extraArgs = {}
 } = {}) {
   const temp = createTempContext({
@@ -276,14 +316,45 @@ async function runRestart({
     launchArgs: [],
     visibleJoinFails,
     visibleJoinedGmUser: null,
+    visibleViewportOverride: null,
+    headlessViewportOverride: null,
     bridgeReady: false,
-    joinedGmUser: null
+    joinedGmUser: null,
+    windowSnapshot,
+    windowSnapshotCalls: 0,
+    windowRestores: [],
+    noPauseSession,
+    prePaused,
+    postPaused: !prePaused,
+    pauseCaptureCalls: 0,
+    pauseRestoreCalls: 0,
+    pauseRestoreFails
   };
   const foundry = await createFakeFoundry(state);
   const bridge = await createFakeBridge(state);
   const foundryPort = foundry.address().port;
   const bridgePort = bridge.address().port;
   temp.context.bridgePort = bridgePort;
+  temp.context.captureLifecycleState = async ({ worldId: requestedWorldId }) => {
+    state.pauseCaptureCalls += 1;
+    if (state.noPauseSession) {
+      return { skipped: true, reason: "no-trusted-same-world-session", worldId: requestedWorldId };
+    }
+    return { worldId: requestedWorldId, paused: state.prePaused };
+  };
+  temp.context.restoreLifecycleState = async ({ worldId: requestedWorldId, pauseState }) => {
+    state.pauseRestoreCalls += 1;
+    if (state.pauseRestoreFails) throw new Error("pause restore failed");
+    const beforePaused = state.postPaused;
+    if (state.postPaused !== pauseState.paused) state.postPaused = pauseState.paused;
+    return {
+      worldId: requestedWorldId,
+      beforePaused,
+      desiredPaused: pauseState.paused,
+      afterPaused: state.postPaused,
+      changed: beforePaused !== state.postPaused
+    };
+  };
   const deps = {
     ...createDeps(state, credentials),
     fetch: globalThis.fetch
@@ -377,13 +448,134 @@ await assert.rejects(
   assert.deepEqual(result.start.launchArgs, ["--remote-debugging-port=39224"]);
   assert.equal(result.launchWorld.world, worldId);
   assert.equal(result.visibleApp.visible, true);
+  assert.equal(result.visibleApp.viewportOverrideApplied, false);
   assert.equal(result.bridge.activeWorld, worldId);
+  assert.equal(result.windowState.snapshot.found, true);
+  assert.equal(result.windowState.preLoginRestore.restored, true);
+  assert.equal(result.windowState.finalRestore.restored, true);
+  assert.equal(result.windowState.finalRestore.foregroundRestoreAttempted, true);
+  assert.equal(result.pauseState.snapshot.paused, false);
+  assert.equal(result.pauseState.restore.afterPaused, false);
   assert.equal(state.quitAttempts, 1);
   assert.equal(state.forceKills, 0);
   assert.equal(state.launches, 1);
+  assert.equal(state.windowSnapshotCalls, 1);
+  assert.equal(state.windowRestores.length, 2);
+  assert.equal(state.pauseCaptureCalls, 1);
+  assert.equal(state.pauseRestoreCalls, 1);
   assert.equal(state.visibleJoinedGmUser, gmUserId);
+  assert.equal(state.visibleViewportOverride, false);
+  assert.equal(state.headlessViewportOverride, true);
   assert.equal(JSON.stringify(result).includes("admin-secret"), false);
   assert.equal(JSON.stringify(result).includes("gm-secret"), false);
+}
+
+{
+  const { result, state } = await runRestart({
+    allowBlank: true,
+    credentials: new Map(),
+    windowSnapshot: {
+      supported: true,
+      found: true,
+      skipped: false,
+      state: "maximized",
+      normalBounds: { left: 1920, top: 0, width: 1440, height: 900 },
+      currentBounds: { left: 1920, top: 0, width: 2560, height: 1440 },
+      foreground: { handle: 0, isFoundry: true }
+    }
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.windowState.preLoginRestore.state, "maximized");
+  assert.equal(result.windowState.finalRestore.state, "maximized");
+  assert.equal(result.windowState.finalRestore.foregroundRestoreAttempted, false);
+  assert.equal(state.windowRestores.length, 2);
+}
+
+{
+  const { result } = await runRestart({
+    allowBlank: true,
+    credentials: new Map(),
+    windowSnapshot: {
+      supported: true,
+      found: true,
+      skipped: false,
+      state: "minimized",
+      normalBounds: { left: -1200, top: 80, width: 1100, height: 700 },
+      currentBounds: { left: -32000, top: -32000, width: 160, height: 28 },
+      foreground: { handle: 0, isFoundry: true }
+    }
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.windowState.preLoginRestore.state, "normal");
+  assert.equal(result.windowState.finalRestore.state, "minimized");
+}
+
+{
+  const { result, state } = await runRestart({
+    allowBlank: true,
+    credentials: new Map(),
+    windowSnapshot: null
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.windowState.snapshot.skipped, true);
+  assert.equal(result.windowState.snapshot.reason, "foundry-window-not-found");
+  assert.equal(state.windowRestores.length, 0);
+  assert.equal(result.windowState.preLoginRestore.skipped, true);
+  assert.equal(result.windowState.finalRestore.skipped, true);
+}
+
+{
+  const { result, state } = await runRestart({
+    allowBlank: true,
+    credentials: new Map(),
+    noPauseSession: true
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.pauseState.snapshot.skipped, true);
+  assert.equal(result.pauseState.snapshot.reason, "no-trusted-same-world-session");
+  assert.equal(result.pauseState.restore.skipped, true);
+  assert.equal(state.pauseCaptureCalls, 1);
+  assert.equal(state.pauseRestoreCalls, 0);
+}
+
+{
+  const { result, state } = await runRestart({
+    allowBlank: true,
+    credentials: new Map(),
+    prePaused: true
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.pauseState.snapshot.paused, true);
+  assert.equal(result.pauseState.restore.afterPaused, true);
+  assert.equal(state.postPaused, true);
+}
+
+await assert.rejects(
+  () => runRestart({
+    allowBlank: true,
+    credentials: new Map(),
+    prePaused: true,
+    pauseRestoreFails: true
+  }),
+  /pause restore failed/
+);
+
+{
+  const { result, state } = await runRestart({
+    allowBlank: true,
+    credentials: new Map(),
+    extraArgs: {
+      preserveWindowState: false,
+      preservePauseState: false
+    }
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.windowState.snapshot.reason, "preserveWindowState=false");
+  assert.equal(result.pauseState.snapshot.reason, "preservePauseState=false");
+  assert.equal(state.windowSnapshotCalls, 0);
+  assert.equal(state.windowRestores.length, 0);
+  assert.equal(state.pauseCaptureCalls, 0);
+  assert.equal(state.pauseRestoreCalls, 0);
 }
 
 {

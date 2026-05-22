@@ -1,6 +1,6 @@
 {
   "name": "foundry-codex-bridge",
-  "version": "0.2.12",
+  "version": "0.2.13",
   "type": "module",
   "description": "Local-first Codex MCP bridge for safely operating trusted Foundry VTT GM sessions.",
   "license": "MIT",
