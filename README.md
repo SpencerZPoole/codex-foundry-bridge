@@ -6,6 +6,31 @@ Foundry Codex Bridge is a security-conscious bridge between AI coding agents and
 
 The project direction is **Guarded Power**: expose useful live-world capability while keeping localhost transport, token auth, GM authorization, redaction, explicit high-risk gates, and backup-first behavior in the workflow.
 
+## Install
+
+In Foundry, open **Add-on Modules > Install Module**, paste this into **Manifest URL**, and install:
+
+```text
+https://github.com/SpencerZPoole/codex-foundry-bridge/releases/latest/download/module.json
+```
+
+That installs only the Foundry module piece. The local Node daemon and Codex MCP adapter are still required before the module can connect to Codex.
+
+To set up the full bridge, clone the repository, install dependencies, create a local bridge token, register the MCP server, and start the daemon:
+
+```powershell
+git clone https://github.com/SpencerZPoole/codex-foundry-bridge.git
+cd codex-foundry-bridge
+npm install
+powershell -ExecutionPolicy Bypass -File scripts\new-token.ps1
+codex mcp add foundryVTT -- node .\src\mcp.js
+powershell -ExecutionPolicy Bypass -File scripts\start-daemon.ps1
+```
+
+For local development instead of release installation, `npm run install:module` copies `module/` into your Foundry data folder.
+
+The MCP adapter and daemon read `CODEX_FOUNDRY_BRIDGE_TOKEN` from the current process environment or from the Windows user environment. The token is local machine authentication only. Do not share it.
+
 ## Highlights
 
 - Shared MCP/daemon tool registry with deterministic capability manifest and checksum.
@@ -37,22 +62,6 @@ This is active local tooling. Treat it as power-user software: review the safety
 - `docs/bridge-capabilities.json` is generated from the registry.
 - `docs/V1_RELEASE_AUDIT_AND_PLAN.md` tracks the v1.0 roadmap.
 - `docs/MARKET_POSITIONING_AND_MONETIZATION.md` records public market-positioning notes.
-
-## Install
-
-Clone the repository, install dependencies, create a local bridge token, install the Foundry module, register the MCP server, and start the daemon:
-
-```powershell
-git clone https://github.com/SpencerZPoole/codex-foundry-bridge.git
-cd codex-foundry-bridge
-npm install
-powershell -ExecutionPolicy Bypass -File scripts\new-token.ps1
-npm run install:module
-codex mcp add foundryVTT -- node .\src\mcp.js
-powershell -ExecutionPolicy Bypass -File scripts\start-daemon.ps1
-```
-
-The MCP adapter and daemon read `CODEX_FOUNDRY_BRIDGE_TOKEN` from the current process environment or from the Windows user environment. The token is local machine authentication only. Do not share it.
 
 ## Foundry GM Setup
 
