@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
-export const BRIDGE_VERSION = "0.2.14";
+export const BRIDGE_VERSION = "0.2.15";
 export const TOOL_REGISTRY_VERSION = 1;
 
 const AnyJson = z.any().optional();

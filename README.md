@@ -38,6 +38,7 @@ The MCP adapter and daemon read `CODEX_FOUNDRY_BRIDGE_TOKEN` from the current pr
 - Foundry module connects only from GM clients and requires explicit trusted-world authorization.
 - `bridge_self_check` and `list_bridge_tools` report readiness, version, registry, runtime, and tool metadata.
 - `get_bridge_quickstart`, `docs/AGENT_QUICKSTART.md`, MCP resources, and a first-contact prompt help new agents learn the bridge on first load.
+- Live-app screenshot workflow guidance teaches agents to prefer the visible host Foundry app for visual evidence when available.
 - `call_bridge_tool` fallback keeps registered tools reachable when direct MCP discovery lags.
 - Read-only world intelligence for compendiums, actors, scenes, world search, readiness audits, and runtime timeline.
 - Preview/apply transactions for journals, scene prep, top-level documents, and chat messages.
@@ -46,10 +47,10 @@ The MCP adapter and daemon read `CODEX_FOUNDRY_BRIDGE_TOKEN` from the current pr
 
 ## Current Status
 
-- Version: `0.2.14`
+- Version: `0.2.15`
 - Foundry compatibility target: Foundry `14`
 - Latest live validation baseline: Foundry `14.362` with D35E `3.0.2` during the `0.2.13` lifecycle pass
-- `0.2.14` validation scope: MCP/daemon discovery, docs, manifest parity, tests, and security scan; no new live-world powers
+- `0.2.15` validation scope: MCP/daemon discovery, docs, manifest parity, tests, and security scan; no new live-world powers
 - Registered tools: `48`
 - Default validation world in this repo's workflow: `scratch`
 
@@ -167,9 +168,24 @@ MCP clients that support prompts can use `foundry_bridge_first_contact`.
 
 The durable human-readable version of this flow is `docs/AGENT_QUICKSTART.md`. The machine-readable source of truth remains `list_bridge_tools` and `docs/bridge-capabilities.json`; both include registry metadata, input keys, output-shape names, risk flags, trusted-session requirements, fallback compatibility, and examples for complex tools.
 
+## Live App Screenshot Workflow
+
+When an agent needs a Foundry screenshot, it should prefer the already-open visible live Foundry app on the host computer when that app is available. Browser-based screenshots are fallback behavior because browser reproductions can render Foundry scenes and UI poorly.
+
+Recommended flow:
+
+1. Call `bridge_self_check` or `foundry_status` to confirm whether a live trusted Foundry session is available.
+2. Use bridge tools or visible UI control to set up the requested scene, canvas position, token, sheet, journal, sidebar, dialog, tab, or sub-tab.
+3. Open or close sheets, journals, sidebars, dialogs, and other windows as needed.
+4. Hide distracting windows only when it helps the requested screenshot.
+5. Capture the visible host app/window once the view is ready.
+6. Use browser-based screenshots only as fallback when the visible app is unavailable or the requested target is a setup, login, or browser-only page.
+
+UI-only view manipulation is fine for screenshot preparation. Persistent world changes still need preview/apply workflows or explicit user approval. Do not launch, validate, or mutate a private production campaign world just to obtain a screenshot unless the user explicitly requests that exact world.
+
 ## Capability Manifest
 
-`docs/bridge-capabilities.json` records bridge version, registry version, checksum, fallback tool, and public metadata for every registered tool. As of `0.2.14`, complex dispatch, transaction, apply, and lifecycle tools also include examples so agents can learn expected call shapes without reading private notes.
+`docs/bridge-capabilities.json` records bridge version, registry version, checksum, fallback tool, and public metadata for every registered tool. As of `0.2.15`, complex dispatch, transaction, apply, lifecycle, and onboarding tools include examples or guidance so agents can learn expected workflow shapes without reading private notes.
 
 Regenerate it with:
 

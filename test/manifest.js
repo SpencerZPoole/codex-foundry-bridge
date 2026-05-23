@@ -51,6 +51,7 @@ const toolsWithExamples = [
   "restart_foundry_world"
 ];
 
+assert.equal(BRIDGE_VERSION, "0.2.15");
 assert.deepEqual(manifest, generatedManifest);
 assert.equal(manifest.bridgeVersion, BRIDGE_VERSION);
 assert.equal(manifest.checksum, toolRegistryChecksum());
@@ -225,6 +226,9 @@ try {
   assert.match(quickstartText, /bridge_self_check/);
   assert.match(quickstartText, /list_bridge_tools/);
   assert.match(quickstartText, /call_bridge_tool/);
+  assert.match(quickstartText, /Live App Screenshot Workflow/);
+  assert.match(quickstartText, /visible live Foundry app/);
+  assert.match(quickstartText, /browser-based screenshots only as fallback/);
 
   const capabilitiesResource = await client.readResource({ uri: BRIDGE_RESOURCE_URIS.capabilities });
   assert.deepEqual(JSON.parse(capabilitiesResource.contents[0].text), manifest);
@@ -239,6 +243,8 @@ try {
   assert.match(promptText, /bridge_self_check/);
   assert.match(promptText, /list_bridge_tools/);
   assert.match(promptText, /call_bridge_tool/);
+  assert.match(promptText, /visible live Foundry app/);
+  assert.match(promptText, /browser screenshots only as fallback/);
 } finally {
   await client.close();
 }
@@ -250,5 +256,8 @@ assert.match(readme, /docs\/AGENT_QUICKSTART\.md/);
 assert.match(readme, /call_bridge_tool/);
 assert.match(readme, /direct MCP/i);
 assert.match(readme, /foundry_bridge_first_contact/);
+assert.match(readme, /Live App Screenshot Workflow/);
+assert.match(readme, /visible live Foundry app/);
+assert.match(readme, /browser-based screenshots are fallback/i);
 
 console.log("Manifest parity checks passed.");

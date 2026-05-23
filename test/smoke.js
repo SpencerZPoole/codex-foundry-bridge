@@ -39,6 +39,7 @@ const chatWorkflowTools = [
   "plan_chat_messages"
 ];
 
+assert.equal(BRIDGE_VERSION, "0.2.15");
 fs.mkdirSync(path.join(foundryDataDir, "Data", "worlds", dynamicWorldId), { recursive: true });
 fs.mkdirSync(path.join(foundryDataDir, "Config"), { recursive: true });
 fs.writeFileSync(path.join(foundryDataDir, "Config", "options.json"), "{}", "utf8");
@@ -443,10 +444,15 @@ try {
   assert.equal(quickstart.body.result.registry.checksum, toolRegistryChecksum());
   assert.ok(quickstart.body.result.firstContact.some((step) => step.includes("bridge_self_check")));
   assert.ok(quickstart.body.result.firstContact.some((step) => step.includes("list_bridge_tools")));
+  assert.ok(Array.isArray(quickstart.body.result.screenshotWorkflow));
+  assert.ok(quickstart.body.result.screenshotWorkflow.some((step) => step.includes("visible live Foundry app")));
+  assert.ok(quickstart.body.result.screenshotWorkflow.some((step) => step.includes("browser-based screenshots only as fallback")));
   assert.ok(quickstart.body.result.exampleTools.some((tool) => tool.name === "apply_bridge_plan"));
 
   const quickstartMarkdown = await callBridge("get_bridge_quickstart", { format: "markdown" });
   assert.match(quickstartMarkdown.body.result, /First Contact Checklist/);
+  assert.match(quickstartMarkdown.body.result, /Live App Screenshot Workflow/);
+  assert.match(quickstartMarkdown.body.result, /visible live Foundry app/);
 
   const quickstartViaFallback = await callBridge("call_bridge_tool", {
     method: "get_bridge_quickstart",

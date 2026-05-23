@@ -1,7 +1,7 @@
 {
-  "bridgeVersion": "0.2.14",
+  "bridgeVersion": "0.2.15",
   "registryVersion": 1,
-  "checksum": "b7d68c055d6d4ad4777b64066c7731d47b703a0ed7d5a2713bc01935aa51f78f",
+  "checksum": "10043263ffdb6f55e5db642128525c278adee58900490126695bde57aae52be5",
   "toolCount": 48,
   "fallback": {
     "tool": "call_bridge_tool",

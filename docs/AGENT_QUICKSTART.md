@@ -16,6 +16,7 @@ This guide is intentionally conservative. It teaches discovery and safety before
 8. Prefer `plan_*` tools plus `apply_bridge_plan` for writes.
 9. Validate disposable behavior on `scratch` unless the user explicitly names another world.
 10. Treat `restart_foundry_world` and `run_gm_script` as explicit-danger workflows.
+11. For Foundry screenshots, prefer the visible live Foundry app on the host computer when it is available.
 
 ## Safety Rules
 
@@ -45,13 +46,28 @@ Use low-level document write tools only when the user explicitly needs raw Found
 
 For lifecycle recovery, use `restart_foundry_world` only with an explicit `worldId` and `dangerous=true`. This fully restarts the local Foundry app and should not be treated like a normal live-world tool.
 
+## Live App Screenshot Workflow
+
+When a user needs a screenshot from Foundry, prefer the already-open visible live Foundry app on the host computer when it is available. Browser-based screenshots should be fallback behavior, because browser reproductions can render Foundry scenes and UI poorly.
+
+Recommended flow:
+
+1. Call `bridge_self_check` or `foundry_status` to confirm whether a live trusted Foundry session is available.
+2. Use bridge tools or visible UI control to prepare the requested scene, canvas position, selected token, sheet, journal, sidebar, dialog, tab, or sub-tab.
+3. Open or close sheets, journals, sidebars, dialogs, and other windows as needed.
+4. Hide distracting windows only when it helps the requested screenshot.
+5. Capture the visible host app/window once the view is ready.
+6. Use browser-based screenshots only as fallback when the visible app is unavailable or the requested target is a setup, login, or browser-only page.
+
+UI-only view manipulation is fine for screenshots. Persistent world changes still require preview/apply workflows or explicit user approval. Do not launch, validate, or mutate a private production campaign world just to obtain a screenshot unless the user explicitly requests that exact world.
+
 ## What Agents Should Learn From Discovery
 
 `bridge_self_check` tells you whether the daemon, Foundry API, module install path, trusted GM session, module version, registry checksum, and runtime diagnostics look ready.
 
 `list_bridge_tools` tells you each tool's category, risk, read/write status, trusted-session requirement, direct MCP exposure, fallback compatibility, input keys, output-shape name, and examples when available.
 
-`get_bridge_quickstart` gives a compact JSON or markdown summary of first-contact steps, safety rules, preferred workflow, MCP resource URIs, prompt name, and example-heavy tools.
+`get_bridge_quickstart` gives a compact JSON or markdown summary of first-contact steps, safety rules, preferred workflow, screenshot workflow, MCP resource URIs, prompt name, and example-heavy tools.
 
 `call_bridge_tool` can reach registered tools when direct MCP discovery is stale, but it still runs the target tool through the same daemon dispatch and safety gates.
 
@@ -85,4 +101,4 @@ It also exposes the `foundry_bridge_first_contact` prompt for clients that suppo
 
 ## Release Notes
 
-This onboarding surface was added in `0.2.14`. It adds no new live Foundry powers. It only makes the existing bridge capability surface easier to discover on new installations and new computers.
+This onboarding surface was added in `0.2.14` and expanded in `0.2.15` with live-app screenshot workflow guidance. It adds no new live Foundry powers. It only makes the existing bridge capability surface easier to discover on new installations and new computers.

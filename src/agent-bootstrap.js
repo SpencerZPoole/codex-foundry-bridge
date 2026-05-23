@@ -18,6 +18,17 @@ const QUICKSTART_PATH = path.join(ROOT, "docs", "AGENT_QUICKSTART.md");
 const CAPABILITIES_PATH = path.join(ROOT, "docs", "bridge-capabilities.json");
 const README_PATH = path.join(ROOT, "README.md");
 
+const SCREENSHOT_WORKFLOW = [
+  "When Foundry screenshots are needed, use bridge_self_check or foundry_status to confirm whether a live trusted Foundry session is available.",
+  "Prefer the already-open visible live Foundry app on the host computer when it is available, because browser reproductions can render Foundry scenes and UI poorly.",
+  "Use bridge tools or visible UI control to set up the requested scene, canvas position, selected token, sheet, journal, sidebar, dialog, tab, or sub-tab.",
+  "Open or close sheets, journals, sidebars, dialogs, and other windows as needed; hide distracting windows only when it helps the requested screenshot.",
+  "Capture the visible host app/window after the view is ready.",
+  "Use browser-based screenshots only as fallback when the visible app is unavailable or the requested target is a setup, login, or browser-only page.",
+  "UI-only view manipulation is fine for screenshots, but persistent world changes still require preview/apply workflows or explicit user approval.",
+  "Do not launch, validate, or mutate private production worlds just to obtain a screenshot unless the user explicitly requests that exact world."
+];
+
 function readTextFile(filePath) {
   return fs.readFileSync(filePath, "utf8");
 }
@@ -87,6 +98,7 @@ export function buildBridgeQuickstartPayload() {
       "Write: use plan_journal_changes, plan_scene_changes, plan_document_changes, or plan_chat_messages before apply_bridge_plan.",
       "Maintain: use backup/revoke/install/lifecycle tools only when the user clearly asks for local maintenance."
     ],
+    screenshotWorkflow: SCREENSHOT_WORKFLOW,
     resources: BRIDGE_RESOURCE_URIS,
     prompt: BRIDGE_FIRST_CONTACT_PROMPT,
     exampleTools
@@ -113,7 +125,13 @@ export function bridgeFirstContactPromptText() {
     "4. Prefer direct MCP tools. Use call_bridge_tool only when direct MCP discovery is stale or incomplete.",
     "5. Do not use trusted-session tools until a GM session is trusted.",
     "6. Prefer preview/apply workflows for writes, and validate disposable behavior on scratch unless the user explicitly chooses another world.",
-    "7. Treat restart_foundry_world and run_gm_script as dangerous=true workflows and never use them casually."
+    "7. Treat restart_foundry_world and run_gm_script as dangerous=true workflows and never use them casually.",
+    "",
+    "Screenshot workflow:",
+    "1. When visual evidence is needed, prefer the visible live Foundry app on the host computer when available.",
+    "2. Prepare the view with bridge tools or visible UI control; open or close sheets, journals, sidebars, dialogs, tabs, and sub-tabs as needed.",
+    "3. Capture the visible host app/window after the view is ready, and use browser screenshots only as fallback when the visible app is unavailable or the target is a setup/browser page.",
+    "4. Keep screenshot prep to UI-only view manipulation unless the user approved persistent world changes through preview/apply or another explicit request."
   ].join("\n");
 }
 
