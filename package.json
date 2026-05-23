@@ -28,7 +28,8 @@
     "smoke": "node test/smoke.js",
     "manifest": "node scripts/generate-capability-manifest.mjs",
     "test": "node test/manifest.js && node test/lifecycle.js && node test/smoke.js",
-    "install:module": "powershell -ExecutionPolicy Bypass -File scripts/install-module.ps1"
+    "install:module": "powershell -ExecutionPolicy Bypass -File scripts/install-module.ps1",
+    "package:release": "powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.22.0",

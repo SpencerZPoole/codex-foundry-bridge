@@ -144,6 +144,23 @@ Validation for the `0.2.15` documentation/workflow pass:
 - Confirmed syntax checks, manifest drift check, `npm test`, `git diff --check`, and the local security gate pass. The security gate reported no errors and three reviewed pre-existing warning patterns in the lifecycle wizard/test harness surfaces.
 - Confirmed validation scope remains docs, manifest parity, tests, and security scan only; no live Foundry validation is required because the slice adds no new live-world read/write authority.
 
+### Public Documentation And Install Truth Slice
+
+Status: completed for the `0.2.15` public documentation refresh.
+
+This pass does not change bridge behavior or bump the package/module version. It makes the already-current `0.2.15` public surface easier to understand and install correctly.
+
+Completed work:
+
+- Rewrote README as the public front door with a master "How It Works" overview, release install path, source/local bridge setup path, GM world setup path, safety model, lifecycle notes, screenshot workflow, and project docs map.
+- Added `docs/ARCHITECTURE.md` as the durable zoomed-out project map for `src/mcp.js`, `src/server.js`, `module/`, `src/tool-registry.js`, `scripts/`, `docs/bridge-capabilities.json`, and the trusted-world request flow.
+- Updated `docs/AGENT_QUICKSTART.md` with an architecture mental model before the first-contact checklist.
+- Updated `docs/MARKET_POSITIONING_AND_MONETIZATION.md` to point to the architecture doc as part of the public credibility story.
+- Added a repeatable release packaging helper for the flat Foundry module zip shape expected by public Foundry install manifests.
+- Published the current `v0.2.15` release assets so `releases/latest/download/module.json` no longer points users at the stale `v0.2.13` module.
+
+This is public docs/install hardening, not a capability slice. No new live-world read/write authority is added, and no live Foundry validation is required.
+
 ### Lifecycle Hardening Slice
 
 Status: expanded for the `0.2.7` development slice and hardened again in `0.2.13`.
@@ -193,6 +210,7 @@ Deliverables:
 - Completed: add `docs/AGENT_QUICKSTART.md`, `get_bridge_quickstart`, MCP resources, and `foundry_bridge_first_contact` so new agents can learn the bridge on first interaction.
 - Completed: add registry/manifest examples for complex fallback, transaction, apply, and lifecycle tool call shapes.
 - Completed: add live-app screenshot workflow guidance to onboarding docs, quickstart JSON, and MCP prompt surfaces.
+- Completed: add `docs/ARCHITECTURE.md`, split README installation into release/source/GM setup paths, and add a repeatable public release packaging helper.
 
 Acceptance:
 

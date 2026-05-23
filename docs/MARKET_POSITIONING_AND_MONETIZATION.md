@@ -1,8 +1,8 @@
 # Foundry Codex Bridge Market Positioning
 
-Reviewed: 2026-05-21
+Reviewed: 2026-05-23
 
-Scope: public repository documentation and the local `FoundryCodexBridge 0.2.15` capability surface. This note compares public project positioning, not private implementation details or exhaustive source history.
+Scope: public repository documentation and the local `FoundryCodexBridge 0.2.15` capability surface. This note compares public project positioning, not private implementation details or exhaustive source history. For the durable technical map of the MCP adapter, daemon, Foundry module, shared registry, and release assets, see `docs/ARCHITECTURE.md`.
 
 ## Positioning Summary
 
@@ -33,6 +33,7 @@ The bridge's most distinctive work is operational trust rather than raw API brea
 - **Backup-first mutation posture**: destructive document operations create local backups, and transaction updates report backup metadata before mutation.
 - **Self-diagnostics**: `bridge_self_check`, `list_bridge_tools`, registry checksums, capability manifests, direct MCP exposure flags, fallback-callable flags, and runtime summaries make drift and broken readiness visible.
 - **Agent first-contact onboarding**: `get_bridge_quickstart`, MCP resources, and the `foundry_bridge_first_contact` prompt help a new agent learn the bridge before touching live-world tools.
+- **Public architecture transparency**: README plus `docs/ARCHITECTURE.md` explain the relationship between the MCP adapter, localhost daemon, Foundry module, shared registry, generated manifest, and release package shape.
 - **Live-app visual evidence workflow**: onboarding guidance tells agents to prefer the visible host Foundry app for screenshots when available, using bridge tools or UI control to prepare the view instead of defaulting to lower-fidelity browser reproductions.
 - **MCP parity fallback**: `call_bridge_tool` keeps registry tools reachable when direct MCP discovery lags, while preserving each target tool's normal gates.
 - **Local lifecycle restart**: `restart_foundry_world` can stop Foundry, relaunch the visible app, launch an explicit world, join as GM, restore a managed bridge GM client, and verify readiness with Windows Credential Manager-backed secrets.
@@ -44,7 +45,7 @@ The bridge's most distinctive work is operational trust rather than raw API brea
 These are useful product signals, not criticisms of the architecture.
 
 - Broader gameplay operations such as dice rolling, actor roll helpers, combat orchestration, roll tables, active effects, walls, tiles, sounds, scene activation, and map/image generation remain future work.
-- Agent first-contact onboarding and screenshot workflow guidance are now present in `0.2.15`, but public onboarding still needs packaging polish beyond the current local development scripts.
+- Agent first-contact onboarding, screenshot workflow guidance, architecture docs, and release/source install separation are now present in `0.2.15`, but public onboarding still needs a packaged installer beyond the current local development scripts.
 - Public docs still need richer end-to-end examples for real GM workflows beyond the first-contact checklist.
 - Lifecycle restart is currently Windows-oriented.
 - Several tools still expose broad JSON payloads and free-form outputs rather than tight schemas and public compatibility contracts.

@@ -2,83 +2,96 @@
 
 Local-first MCP tooling for safely operating a trusted Foundry VTT GM session from Codex.
 
-Foundry Codex Bridge is a security-conscious bridge between AI coding agents and live Foundry VTT worlds. It is designed for real campaign operations, not just demos: inspect the world, diagnose the bridge, preview changes, apply confirmed plans, restart the local Foundry app, and keep private campaign data behind a trusted GM session gate.
+Foundry Codex Bridge connects AI coding agents to live Foundry VTT worlds without turning campaign data into an unguarded remote-control surface. It can inspect world state, search compendiums, preview and apply confirmed changes, post guarded chat messages, restart the local Foundry app, restore a bridge-ready GM session, and teach new agents how to discover the available tools on first contact.
 
-The project direction is **Guarded Power**: expose useful live-world capability while keeping localhost transport, token auth, GM authorization, redaction, explicit high-risk gates, and backup-first behavior in the workflow.
+The project direction is **Guarded Power**: useful live-world capability with localhost transport, token auth, explicit GM trust, redaction, backups, preview/apply transactions, and `dangerous=true` gates for high-risk workflows.
+
+## How It Works
+
+The bridge has four cooperating pieces:
+
+1. **MCP adapter**: `src/mcp.js` exposes the tool surface to Codex and other MCP clients over stdio. It registers tools, resources, and prompts from the shared registry and onboarding docs.
+2. **Local daemon**: `src/server.js` runs on localhost, accepts token-authenticated `/call` requests, hosts the Foundry WebSocket endpoint at `/foundry`, enforces trust gates, dispatches tools, redacts output, manages backups, and supports lifecycle restart.
+3. **Foundry module**: `module/` installs into Foundry and runs inside an opened world. A GM client connects back to the local daemon and executes trusted-session requests through live Foundry APIs.
+4. **Shared tool registry**: `src/tool-registry.js` is the source of truth for tool metadata, MCP registration, daemon dispatch, docs, tests, examples, and `docs/bridge-capabilities.json`.
+
+Typical request flow:
+
+```text
+Codex or MCP client
+  -> src/mcp.js stdio adapter
+  -> src/server.js localhost daemon with CODEX_FOUNDRY_BRIDGE_TOKEN
+  -> module/scripts/bridge.js in a trusted GM Foundry session
+  -> live Foundry API
+```
+
+Read the full system map in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Current Status
+
+- Version: `0.2.15`
+- Foundry compatibility target: Foundry `14`
+- Registered tools: `48`
+- Public capability manifest: [docs/bridge-capabilities.json](docs/bridge-capabilities.json)
+- Agent first-contact guide: [docs/AGENT_QUICKSTART.md](docs/AGENT_QUICKSTART.md)
+- v1 roadmap: [docs/V1_RELEASE_AUDIT_AND_PLAN.md](docs/V1_RELEASE_AUDIT_AND_PLAN.md)
+- Default disposable validation world used by this repo's workflow: `scratch`
+
+Latest live validation baseline is Foundry `14.362` with D35E `3.0.2` during the `0.2.13` lifecycle pass. The `0.2.15` changes are docs, onboarding, manifest parity, and screenshot-workflow guidance only; they add no new live-world powers.
 
 ## Install
 
-In Foundry, open **Add-on Modules > Install Module**, paste this into **Manifest URL**, and install:
+There are three separate setup layers. First install the Foundry module, then set up the local bridge process, then authorize a GM world.
+
+### 1. Release Install For Foundry
+
+In Foundry, open **Add-on Modules > Install Module**, paste this manifest URL, and install:
 
 ```text
 https://github.com/SpencerZPoole/codex-foundry-bridge/releases/latest/download/module.json
 ```
 
-That installs only the Foundry module piece. The local Node daemon and Codex MCP adapter are still required before the module can connect to Codex.
+That installs only the Foundry module. It does not install Node dependencies, start the local daemon, or configure Codex/MCP by itself.
 
-To set up the full bridge, clone the repository, install dependencies, create a local bridge token, register the MCP server, and start the daemon:
+The release zip is shaped like a normal Foundry module package, with `module.json` and `scripts/bridge.js` at the archive root.
+
+### 2. Local Bridge Setup From Source
+
+Until this project has a packaged desktop installer, the local MCP adapter and daemon are installed from this repository:
 
 ```powershell
 git clone https://github.com/SpencerZPoole/codex-foundry-bridge.git
 cd codex-foundry-bridge
 npm install
 powershell -ExecutionPolicy Bypass -File scripts\new-token.ps1
-codex mcp add foundryVTT -- node .\src\mcp.js
-powershell -ExecutionPolicy Bypass -File scripts\start-daemon.ps1
 ```
 
-For local development instead of release installation, `npm run install:module` copies `module/` into your Foundry data folder.
+`scripts\new-token.ps1` creates a local `CODEX_FOUNDRY_BRIDGE_TOKEN` in the Windows user environment. Restart Codex or your shell after running it so the token is visible to new processes.
 
-The MCP adapter and daemon read `CODEX_FOUNDRY_BRIDGE_TOKEN` from the current process environment or from the Windows user environment. The token is local machine authentication only. Do not share it.
+Register the MCP server with Codex:
 
-## Highlights
+```powershell
+$repo = (Get-Location).Path
+codex mcp add foundryVTT -- node "$repo\src\mcp.js"
+```
 
-- Shared MCP/daemon tool registry with deterministic capability manifest, examples, and checksum.
-- Localhost-only daemon with `CODEX_FOUNDRY_BRIDGE_TOKEN` authentication.
-- Foundry module connects only from GM clients and requires explicit trusted-world authorization.
-- `bridge_self_check` and `list_bridge_tools` report readiness, version, registry, runtime, and tool metadata.
-- `get_bridge_quickstart`, `docs/AGENT_QUICKSTART.md`, MCP resources, and a first-contact prompt help new agents learn the bridge on first load.
-- Live-app screenshot workflow guidance teaches agents to prefer the visible host Foundry app for visual evidence when available.
-- `call_bridge_tool` fallback keeps registered tools reachable when direct MCP discovery lags.
-- Read-only world intelligence for compendiums, actors, scenes, world search, readiness audits, and runtime timeline.
-- Preview/apply transactions for journals, scene prep, top-level documents, and chat messages.
-- Backup-first destructive document operations.
-- Guarded local lifecycle restart that can relaunch Foundry, join an explicit world as GM, preserve visible-window/pause state, and restore bridge readiness.
+If your MCP client does not use `codex mcp add`, configure a stdio MCP server whose command is `node` and whose first argument is the absolute path to `src/mcp.js`.
 
-## Current Status
-
-- Version: `0.2.15`
-- Foundry compatibility target: Foundry `14`
-- Latest live validation baseline: Foundry `14.362` with D35E `3.0.2` during the `0.2.13` lifecycle pass
-- `0.2.15` validation scope: MCP/daemon discovery, docs, manifest parity, tests, and security scan; no new live-world powers
-- Registered tools: `48`
-- Default validation world in this repo's workflow: `scratch`
-
-This is active local tooling. Treat it as power-user software: review the safety model, run tests, and start with a disposable Foundry world before pointing it at anything important.
-
-## Repository Shape
-
-- `src/server.js` runs the localhost daemon and Foundry WebSocket endpoint.
-- `src/mcp.js` exposes the MCP stdio adapter.
-- `src/tool-registry.js` is the shared tool registry used by MCP, daemon dispatch, docs, and tests.
-- `docs/AGENT_QUICKSTART.md` is the first-contact guide for agents and MCP clients.
-- `module/` is the Foundry module installed into the local Foundry data folder.
-- `docs/bridge-capabilities.json` is generated from the registry.
-- `docs/V1_RELEASE_AUDIT_AND_PLAN.md` tracks the v1.0 roadmap.
-- `docs/MARKET_POSITIONING_AND_MONETIZATION.md` records public market-positioning notes.
-
-## Foundry GM Setup
-
-1. Restart Foundry after installing the module.
-2. Open the target world as a GM user.
-3. Enable the `Codex Foundry Bridge` module in the world.
-4. Start the local daemon if it is not already running:
+Start the daemon manually when you want a preflight check:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\start-daemon.ps1
 ```
 
-5. Copy the token:
+The MCP adapter can also start the daemon automatically when a tool call needs it.
+
+### 3. Foundry GM World Setup
+
+1. Restart Foundry after installing the module.
+2. Open the target world as a GM user.
+3. Enable the `Codex Foundry Bridge` module in that world.
+4. Start the local daemon if it is not already running.
+5. Copy the bridge token:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\copy-token-to-clipboard.ps1
@@ -90,7 +103,7 @@ powershell -ExecutionPolicy Bypass -File scripts\copy-token-to-clipboard.ps1
 await CodexFoundryBridge.setToken(await navigator.clipboard.readText())
 ```
 
-On first connection in a world, the module prompts the GM to authorize that world for Codex MCP access. Until the GM approves, the daemon keeps the browser session pending and refuses live-world tools such as document edits, macro execution, snapshots, and `run_gm_script`.
+On first connection in a world, the module prompts the GM to authorize that world for Codex MCP access. Until the GM approves, the daemon keeps the browser session pending and refuses trusted-session tools.
 
 Useful in-client helpers:
 
@@ -100,9 +113,29 @@ await CodexFoundryBridge.revokeCurrentWorld()
 CodexFoundryBridge.authorizationStatus()
 ```
 
-## Tool Surface
+Verify from Codex or another MCP client:
 
-Diagnostics and registry:
+```json
+{ "method": "bridge_self_check" }
+```
+
+```json
+{ "method": "list_bridge_tools" }
+```
+
+### Source/Development Module Install
+
+For local development, this command copies `module/` into your Foundry data folder:
+
+```powershell
+npm run install:module
+```
+
+Use this only when developing from the repository. Normal Foundry users should use the release manifest URL above.
+
+## Tool Families
+
+Diagnostics and discovery:
 
 - `foundry_status`
 - `bridge_self_check`
@@ -112,13 +145,12 @@ Diagnostics and registry:
 
 Read-only intelligence:
 
-- `list_compendium_packs`, `search_compendium`, `get_compendium_document`
-- `summarize_actor`, `summarize_scene`
-- `summarize_world_index`, `search_world`
-- `audit_scene_readiness`, `audit_actor_readiness`
-- `get_runtime_events`, `get_runtime_timeline`, `tail_logs`
+- compendium pack listing, search, and document reads
+- actor and scene summaries
+- world index, world search, scene readiness, actor readiness, and runtime timeline
+- local package/config/log inspection with redaction
 
-Guarded workflow tools:
+Guarded workflows:
 
 - `plan_journal_changes`
 - `plan_scene_changes`
@@ -136,23 +168,23 @@ Operations and maintenance:
 - module install/update helper
 - guarded `restart_foundry_world` lifecycle restart
 
-Use `list_bridge_tools` for the current complete registry, including each tool's category, risk flags, trusted-session requirement, direct MCP exposure, fallback support, and output shape.
+Use `list_bridge_tools` for the complete current registry, including each tool's category, risk, read/write flag, trusted-session requirement, direct MCP exposure flag, fallback support, input keys, output-shape name, and examples.
 
 ## Agent First Contact
 
-The bridge is designed to be self-describing for agents that have no private project memory. New agents should start with:
+New agents should not guess the bridge surface from memory. Start with:
 
 ```json
 { "method": "bridge_self_check" }
 ```
 
-Then inspect the full registry:
+Then inspect the registry:
 
 ```json
 { "method": "list_bridge_tools" }
 ```
 
-For a compact onboarding payload, use:
+For a compact onboarding payload:
 
 ```json
 { "method": "get_bridge_quickstart", "args": { "format": "json" } }
@@ -166,7 +198,28 @@ MCP clients that support resources can also read:
 
 MCP clients that support prompts can use `foundry_bridge_first_contact`.
 
-The durable human-readable version of this flow is `docs/AGENT_QUICKSTART.md`. The machine-readable source of truth remains `list_bridge_tools` and `docs/bridge-capabilities.json`; both include registry metadata, input keys, output-shape names, risk flags, trusted-session requirements, fallback compatibility, and examples for complex tools.
+Prefer direct MCP tools when they are visible. Use `call_bridge_tool` only when MCP discovery is stale or incomplete; it still runs through normal daemon dispatch and normal safety gates.
+
+## Previewable Transactions
+
+The safest write path is preview first, apply second.
+
+`plan_journal_changes`, `plan_scene_changes`, `plan_document_changes`, and `plan_chat_messages` are read-only planning tools. They return a `BridgePlan` with `planId`, `planHash`, `worldId`, expiration, resolved targets, compact before/after previews, warnings, and backup requirements.
+
+To mutate the world, pass the full plan to `apply_bridge_plan` with matching confirmation:
+
+```json
+{
+  "plan": "<returned BridgePlan>",
+  "confirmation": {
+    "planId": "<returned planId>",
+    "planHash": "<returned planHash>",
+    "worldId": "scratch"
+  }
+}
+```
+
+Document plans currently cover top-level Actor, Item, Scene, and Folder create/update operations. Chat plans create messages only and support `notice`, `handout`, `gm_note`, and `secret_check_prompt`. Scene prep currently covers tokens, ambient lights, and notes.
 
 ## Live App Screenshot Workflow
 
@@ -183,9 +236,50 @@ Recommended flow:
 
 UI-only view manipulation is fine for screenshot preparation. Persistent world changes still need preview/apply workflows or explicit user approval. Do not launch, validate, or mutate a private production campaign world just to obtain a screenshot unless the user explicitly requests that exact world.
 
+## Foundry Lifecycle Restart
+
+`restart_foundry_world` is a local lifecycle tool for recovering the bridge when Foundry must fully quit and relaunch. It is not a normal live-world tool because the GM WebSocket is gone while Foundry is closed.
+
+The tool requires:
+
+- explicit `worldId`
+- `dangerous=true`
+- local lifecycle config
+- Windows Credential Manager secrets when Foundry admin or GM passwords are configured
+
+Configure lifecycle settings:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\set-lifecycle-credentials.ps1 -WorldId scratch -GmUserId <gm-user-id> -SkipAdminPassword -AllowBlankGmPassword
+```
+
+Use `-SkipAdminPassword` only when Foundry has no administrator password configured. Use `-AllowBlankGmPassword` only for a GM user with an empty access key. Otherwise omit those switches and the script prompts locally for credentials and stores them in Windows Credential Manager targets such as `FoundryCodexBridge/AdminPassword` and `FoundryCodexBridge/World/<worldId>/GM`.
+
+The module also includes a GM-only lifecycle credential wizard from the module settings once a world is trusted. The wizard sends secrets only to the localhost daemon over the token-authenticated trusted GM bridge connection, and the daemon returns only redacted status booleans and target names.
+
+Example:
+
+```json
+{ "method": "restart_foundry_world", "args": { "worldId": "scratch", "dangerous": true } }
+```
+
+On Windows, restart preserves the visible Foundry Electron window's monitor, bounds, and normal/maximized/minimized state by default. It also snapshots `game.paused` when a trusted same-world GM bridge session is connected before shutdown and restores that pause state after the world is bridge-ready.
+
+## Safety Model
+
+- Localhost daemon only by default.
+- Token-authenticated daemon calls through `CODEX_FOUNDRY_BRIDGE_TOKEN`.
+- GM-only Foundry module connection.
+- Trusted-world authorization before live-world reads or writes.
+- Redacted outputs for token-like and credential-like fields.
+- Backup-first destructive document operations.
+- `dangerous=true` required for raw GM script execution and lifecycle restart.
+- Preview/apply transactions require matching `planId`, `planHash`, and `worldId`.
+- Runtime diagnostics are observational; they do not change Foundry behavior or world data.
+
 ## Capability Manifest
 
-`docs/bridge-capabilities.json` records bridge version, registry version, checksum, fallback tool, and public metadata for every registered tool. As of `0.2.15`, complex dispatch, transaction, apply, lifecycle, and onboarding tools include examples or guidance so agents can learn expected workflow shapes without reading private notes.
+[docs/bridge-capabilities.json](docs/bridge-capabilities.json) records bridge version, registry version, checksum, fallback tool, and public metadata for every registered tool.
 
 Regenerate it with:
 
@@ -199,96 +293,10 @@ Verify committed content with:
 node scripts\generate-capability-manifest.mjs --check
 ```
 
-Prefer direct MCP tools when they are visible. Use `call_bridge_tool` when MCP discovery is stale or incomplete; it still runs the target tool through normal daemon dispatch and safety gates.
-
-Fallback examples:
-
-```json
-{ "method": "bridge_self_check" }
-{ "method": "search_compendium", "args": { "pack": "D35E.spells", "query": "acid arrow", "limit": 5 } }
-{ "method": "summarize_world_index", "args": { "includeSamples": true, "sampleLimit": 3 } }
-{ "method": "plan_journal_changes", "args": { "action": "create_entry", "entryName": "Codex Prep Notes", "pages": [{ "name": "Overview", "content": "<p>Draft notes.</p>" }] } }
-{ "method": "plan_scene_changes", "args": { "changes": [{ "action": "create_token", "data": { "name": "Codex Marker", "x": 100, "y": 100, "hidden": true } }] } }
-{ "method": "plan_document_changes", "args": { "changes": [{ "action": "create", "documentName": "Item", "data": { "name": "Codex Marker Item", "type": "loot" } }] } }
-{ "method": "plan_chat_messages", "args": { "messages": [{ "kind": "secret_check_prompt", "checkName": "Listen", "dc": 15, "prompt": "Resolve privately." }] } }
-```
-
-The fallback is not a privilege bypass. High-risk tools still require their normal arguments and gates, such as `run_gm_script` requiring `dangerous=true` and a trusted GM session. `apply_bridge_plan` still requires the full plan plus matching confirmation values returned by the preview step.
-
-## Previewable Transactions
-
-`plan_journal_changes`, `plan_scene_changes`, `plan_document_changes`, and `plan_chat_messages` are preview-only. They return a `BridgePlan` with `planId`, `planHash`, `worldId`, expiration, resolved targets, compact before/after previews, warnings, and backup requirements.
-
-To mutate the world, pass the full plan to `apply_bridge_plan` with matching confirmation:
-
-```json
-{
-  "plan": "<returned BridgePlan>",
-  "confirmation": {
-    "planId": "<returned planId>",
-    "planHash": "<returned planHash>",
-    "worldId": "scratch"
-  }
-}
-```
-
-Document plans currently cover top-level Actor, Item, Scene, and Folder create/update operations. Chat plans create messages only and support `notice`, `handout`, `gm_note`, and `secret_check_prompt` kinds. Scene prep currently covers tokens, ambient lights, and notes.
-
-## Foundry Lifecycle Restart
-
-`restart_foundry_world` is a local lifecycle tool for recovering the bridge when Foundry must fully quit and relaunch. It is separate from live-world tools because the GM websocket is gone while Foundry is closed.
-
-On Windows, restart preserves the visible Foundry Electron window's monitor, bounds, and normal/maximized/minimized state by default. It also snapshots `game.paused` before shutdown when a trusted same-world GM bridge session is connected, then restores that paused/unpaused state after the world is back and bridge-ready. Window restore is best-effort and reported in the result; pause restore is strict once a pause snapshot was captured.
-
-The visible Electron app is driven without the managed headless viewport override, so the app should render to its real window size. The separate managed bridge GM client still uses a fixed headless viewport for reliable automation. If an older managed browser instance is still holding the bridge's dedicated browser profile, the lifecycle launcher clears only those profile-scoped Edge/Chrome processes before starting the requested CDP port.
-
-Configure non-secret lifecycle settings and Windows Credential Manager secrets with:
+## Development And Release Checks
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\set-lifecycle-credentials.ps1 -WorldId scratch -GmUserId <gm-user-id> -SkipAdminPassword -AllowBlankGmPassword
-```
-
-Use `-SkipAdminPassword` only when Foundry has no administrator password configured. Use `-AllowBlankGmPassword` only for a GM user with an empty access key. Otherwise omit those switches and the script prompts locally for the administrator password and GM access key, storing them under Windows Credential Manager targets such as `FoundryCodexBridge/AdminPassword` and `FoundryCodexBridge/World/<worldId>/GM`.
-
-You can also configure this from Foundry after the module is enabled and the world is trusted:
-
-1. Open the `Codex Foundry Bridge` module settings.
-2. Choose `Lifecycle Credential Setup`.
-3. Select the GM user, enter the Foundry administrator password if required, enter the world GM access key or mark it blank, and store the settings.
-
-The module wizard sends credentials only to the localhost daemon over the token-authenticated trusted GM bridge connection. The daemon writes Windows Credential Manager entries and returns only redacted status booleans and target names.
-
-Example fallback call:
-
-```json
-{ "method": "restart_foundry_world", "args": { "worldId": "scratch", "dangerous": true } }
-```
-
-Optional lifecycle quality-of-life flags default to `true`: `preserveWindowState`, `preservePauseState`, and `preserveForegroundFocus`. Set one to `false` only when troubleshooting local window automation or intentionally changing the paused state during restart.
-
-If the module cannot be enabled from the Foundry UI, close Foundry completely and run the offline helper with an explicit world id:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\enable-world-module-offline.ps1 -WorldId <world-id>
-```
-
-The helper refuses to run while Foundry is open and backs up `settings.db` first. Prefer Foundry's Manage Modules UI for normal setup.
-
-## Safety Model
-
-- Localhost daemon only by default.
-- Token-authenticated daemon calls.
-- GM-only Foundry module connection.
-- Trusted-world authorization before live-world reads or writes.
-- Redacted outputs for token-like and credential-like fields.
-- Backup-first destructive document operations.
-- `dangerous=true` required for raw GM script execution and lifecycle restart.
-- Preview/apply transactions require matching `planId`, `planHash`, and `worldId` confirmation.
-- Runtime diagnostics are observational only; they do not change Foundry behavior or world data.
-
-## Development Checks
-
-```powershell
+node --check src\agent-bootstrap.js
 node --check src\tool-registry.js
 node --check src\lifecycle.js
 node --check src\mcp.js
@@ -299,9 +307,35 @@ node scripts\generate-capability-manifest.mjs --check
 npm test
 ```
 
+Build the Foundry module release assets:
+
+```powershell
+npm run package:release
+```
+
+That creates `dist\codex-foundry-bridge-v<version>.zip`. Release artifacts in `dist/` are intentionally ignored by Git.
+
+## Offline Module Enable Helper
+
+If the module cannot be enabled from the Foundry UI, close Foundry completely and run the offline helper with an explicit world id:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\enable-world-module-offline.ps1 -WorldId <world-id>
+```
+
+The helper refuses to run while Foundry is open and backs up `settings.db` first. Prefer Foundry's Manage Modules UI for normal setup.
+
+## Project Docs
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): zoomed-out project map and request flow
+- [docs/AGENT_QUICKSTART.md](docs/AGENT_QUICKSTART.md): first-contact checklist for agents
+- [docs/bridge-capabilities.json](docs/bridge-capabilities.json): generated registry manifest
+- [docs/V1_RELEASE_AUDIT_AND_PLAN.md](docs/V1_RELEASE_AUDIT_AND_PLAN.md): v1 roadmap and validation history
+- [docs/MARKET_POSITIONING_AND_MONETIZATION.md](docs/MARKET_POSITIONING_AND_MONETIZATION.md): public positioning and monetization notes
+
 ## License
 
-MIT. See `LICENSE`.
+MIT. See [LICENSE](LICENSE).
 
 ## Donate
 

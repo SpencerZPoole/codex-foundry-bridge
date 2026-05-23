@@ -250,14 +250,41 @@ try {
 }
 
 const readme = fs.readFileSync(path.join(projectRoot, "README.md"), "utf8");
+const architecture = fs.readFileSync(path.join(projectRoot, "docs", "ARCHITECTURE.md"), "utf8");
+const quickstartDoc = fs.readFileSync(path.join(projectRoot, "docs", "AGENT_QUICKSTART.md"), "utf8");
 assert.match(readme, /docs\/V1_RELEASE_AUDIT_AND_PLAN\.md/);
 assert.match(readme, /docs\/bridge-capabilities\.json/);
 assert.match(readme, /docs\/AGENT_QUICKSTART\.md/);
+assert.match(readme, /docs\/ARCHITECTURE\.md/);
+assert.match(readme, /MCP adapter/i);
+assert.match(readme, /local daemon/i);
+assert.match(readme, /Foundry module/i);
+assert.match(readme, /shared tool registry/i);
+assert.match(readme, /trusted GM/i);
+assert.match(readme, /Release Install For Foundry/);
+assert.match(readme, /Local Bridge Setup From Source/);
+assert.match(readme, /Foundry GM World Setup/);
 assert.match(readme, /call_bridge_tool/);
 assert.match(readme, /direct MCP/i);
 assert.match(readme, /foundry_bridge_first_contact/);
 assert.match(readme, /Live App Screenshot Workflow/);
 assert.match(readme, /visible live Foundry app/);
 assert.match(readme, /browser-based screenshots are fallback/i);
+
+assert.match(architecture, /src\/mcp\.js/);
+assert.match(architecture, /src\/server\.js/);
+assert.match(architecture, /module\//);
+assert.match(architecture, /src\/tool-registry\.js/);
+assert.match(architecture, /CODEX_FOUNDRY_BRIDGE_TOKEN/);
+assert.match(architecture, /docs\/bridge-capabilities\.json/);
+assert.match(architecture, /trusted-world/i);
+assert.match(architecture, /trusted GM/i);
+assert.match(architecture, /module\.json/);
+assert.match(architecture, /scripts\/bridge\.js/);
+
+assert.match(quickstartDoc, /Architecture Mental Model/);
+assert.match(quickstartDoc, /src\/mcp\.js/);
+assert.match(quickstartDoc, /src\/server\.js/);
+assert.match(quickstartDoc, /module\/scripts\/bridge\.js/);
 
 console.log("Manifest parity checks passed.");

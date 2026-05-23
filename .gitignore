@@ -5,6 +5,7 @@ bridge-token.txt
 *.log
 logs/
 backups/
+dist/
 config/trusted-worlds.json
 config/trusted-worlds.json.tmp
 config/lifecycle.json

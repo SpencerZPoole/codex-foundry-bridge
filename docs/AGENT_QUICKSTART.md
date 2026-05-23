@@ -4,6 +4,22 @@ Use this file when an agent encounters a new Foundry Codex Bridge installation f
 
 This guide is intentionally conservative. It teaches discovery and safety before it teaches power. The live source of truth is always the current bridge response from `bridge_self_check` and `list_bridge_tools`.
 
+## Architecture Mental Model
+
+Think of the bridge as a local trust chain:
+
+```text
+Agent or MCP client
+  -> MCP adapter (`src/mcp.js`)
+  -> localhost daemon (`src/server.js`)
+  -> trusted GM Foundry module session (`module/scripts/bridge.js`)
+  -> live Foundry API
+```
+
+The MCP adapter does not talk to Foundry directly. It forwards tool calls to the local daemon. The daemon enforces the bridge token, registry metadata, trusted-world gates, redaction, backups, and lifecycle rules. Live-world tools run only when the Foundry module is loaded in a GM session and that world has been explicitly trusted.
+
+The durable public architecture map is `docs/ARCHITECTURE.md`.
+
 ## First Contact Checklist
 
 1. Call `bridge_self_check`.
