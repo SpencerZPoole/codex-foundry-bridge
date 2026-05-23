@@ -43,7 +43,8 @@ The bridge's most distinctive work is operational trust rather than raw API brea
 These are useful product signals, not criticisms of the architecture.
 
 - Broader gameplay operations such as dice rolling, actor roll helpers, combat orchestration, roll tables, active effects, walls, tiles, sounds, scene activation, and map/image generation remain future work.
-- Public onboarding still needs packaging polish beyond the current local development scripts.
+- Agent first-contact onboarding is now present in `0.2.14`, but public onboarding still needs packaging polish beyond the current local development scripts.
+- Public docs still need richer end-to-end examples for real GM workflows beyond the first-contact checklist.
 - Lifecycle restart is currently Windows-oriented.
 - Several tools still expose broad JSON payloads and free-form outputs rather than tight schemas and public compatibility contracts.
 - The project does not yet include a rollback browser, transaction history viewer, persistent session timeline, packaged installer, marketplace-ready docs, or polished GM workflow UI.

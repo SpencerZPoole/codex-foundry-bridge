@@ -33,11 +33,11 @@ The MCP adapter and daemon read `CODEX_FOUNDRY_BRIDGE_TOKEN` from the current pr
 
 ## Highlights
 
-- Shared MCP/daemon tool registry with deterministic capability manifest and checksum.
+- Shared MCP/daemon tool registry with deterministic capability manifest, examples, and checksum.
 - Localhost-only daemon with `CODEX_FOUNDRY_BRIDGE_TOKEN` authentication.
 - Foundry module connects only from GM clients and requires explicit trusted-world authorization.
 - `bridge_self_check` and `list_bridge_tools` report readiness, version, registry, runtime, and tool metadata.
-- `get_bridge_quickstart`, MCP resources, and a first-contact prompt help new agents learn the bridge on first load.
+- `get_bridge_quickstart`, `docs/AGENT_QUICKSTART.md`, MCP resources, and a first-contact prompt help new agents learn the bridge on first load.
 - `call_bridge_tool` fallback keeps registered tools reachable when direct MCP discovery lags.
 - Read-only world intelligence for compendiums, actors, scenes, world search, readiness audits, and runtime timeline.
 - Preview/apply transactions for journals, scene prep, top-level documents, and chat messages.
@@ -48,7 +48,8 @@ The MCP adapter and daemon read `CODEX_FOUNDRY_BRIDGE_TOKEN` from the current pr
 
 - Version: `0.2.14`
 - Foundry compatibility target: Foundry `14`
-- Live validation baseline: Foundry `14.361` with D35E `3.0.2`
+- Latest live validation baseline: Foundry `14.362` with D35E `3.0.2` during the `0.2.13` lifecycle pass
+- `0.2.14` validation scope: MCP/daemon discovery, docs, manifest parity, tests, and security scan; no new live-world powers
 - Registered tools: `48`
 - Default validation world in this repo's workflow: `scratch`
 
@@ -138,7 +139,7 @@ Use `list_bridge_tools` for the current complete registry, including each tool's
 
 ## Agent First Contact
 
-New agents should start with:
+The bridge is designed to be self-describing for agents that have no private project memory. New agents should start with:
 
 ```json
 { "method": "bridge_self_check" }
@@ -164,9 +165,11 @@ MCP clients that support resources can also read:
 
 MCP clients that support prompts can use `foundry_bridge_first_contact`.
 
+The durable human-readable version of this flow is `docs/AGENT_QUICKSTART.md`. The machine-readable source of truth remains `list_bridge_tools` and `docs/bridge-capabilities.json`; both include registry metadata, input keys, output-shape names, risk flags, trusted-session requirements, fallback compatibility, and examples for complex tools.
+
 ## Capability Manifest
 
-`docs/bridge-capabilities.json` records bridge version, registry version, checksum, fallback tool, and public metadata for every registered tool.
+`docs/bridge-capabilities.json` records bridge version, registry version, checksum, fallback tool, and public metadata for every registered tool. As of `0.2.14`, complex dispatch, transaction, apply, and lifecycle tools also include examples so agents can learn expected call shapes without reading private notes.
 
 Regenerate it with:
 

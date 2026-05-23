@@ -4,7 +4,7 @@ Last updated: 2026-05-23
 
 ## Summary
 
-`FoundryCodexBridge` is currently a strong local-only FoundryVTT control bridge, not just a proof of concept. Version `0.2.14` exposes a shared registry of 48 MCP/daemon tools, supports direct MCP discovery plus `call_bridge_tool` fallback dispatch, includes first-contact agent onboarding resources, includes a guarded local Foundry app lifecycle restart workflow for explicit worlds with visible-window and pause-state preservation, adds high-level read-only live-world intelligence, and supports previewable journal/page, scene token/light/note, typed top-level document, and chat message transactions.
+`FoundryCodexBridge` is currently a strong local-only FoundryVTT control bridge, not just a proof of concept. Version `0.2.14` exposes a shared registry of 48 MCP/daemon tools, supports direct MCP discovery plus `call_bridge_tool` fallback dispatch, includes first-contact agent onboarding resources, keeps a guarded local Foundry app lifecycle restart workflow for explicit worlds with visible-window and pause-state preservation, adds high-level read-only live-world intelligence, and supports previewable journal/page, scene token/light/note, typed top-level document, and chat message transactions.
 
 The v1.0 release goal is **Guarded Power**: expand practical live-project ability substantially while preserving the current safety model: localhost daemon, bridge token, trusted GM session gate, redaction, backups before destructive edits, and explicit `dangerous=true` for raw GM script execution.
 
@@ -30,9 +30,9 @@ This suggests a monetizable lane, but not as "just another Foundry MCP." The bes
 - Live validation world: `scratch`
 - Live Foundry: `14.362`
 - Live system: `D35E 3.0.2`
-- Live bridge status: `bridge_self_check.ready=true` on `scratch`
-- Latest live module script version: `0.2.13`
-- Latest installed module manifest file version: `0.2.13`
+- Latest live bridge status: `bridge_self_check.ready=true` on `scratch` during the `0.2.13` lifecycle pass
+- Latest live-validated module script version: `0.2.13`
+- Latest live-validated installed module manifest file version: `0.2.13`
 - Trusted GM sessions: `2` after visible Electron GM login plus managed bridge GM client restart validation
 - Runtime event health: no errors; Foundry deprecation warnings only from compatibility/runtime read paths
 - Latest live `0.2.13` self-check action items: none; `0.2.14` adds a non-blocking onboarding action pointing agents to `get_bridge_quickstart` and `list_bridge_tools`.
@@ -123,6 +123,16 @@ The `0.2.14` slice turns the bridge from merely discoverable into first-contact 
 
 This slice adds no new live Foundry powers. It changes metadata, docs, and MCP discoverability only. Live-world authority remains governed by localhost transport, token auth, trusted GM sessions, redaction, backup/confirmation behavior, and `dangerous=true` gates.
 
+Validation for the `0.2.14` documentation/discovery pass:
+
+- Confirmed `docs/AGENT_QUICKSTART.md` is tracked and referenced from README.
+- Confirmed `get_bridge_quickstart` is registered as a read-only diagnostic tool with no trusted-session requirement.
+- Confirmed MCP resources expose the quickstart, capability manifest, and README.
+- Confirmed MCP prompt discovery exposes `foundry_bridge_first_contact`.
+- Confirmed `docs/bridge-capabilities.json` reports bridge version `0.2.14`, registry checksum `b7d68c055d6d4ad4777b64066c7731d47b703a0ed7d5a2713bc01935aa51f78f`, and 48 tools.
+- Confirmed `npm test`, manifest drift check, syntax checks, and local security gate pass.
+- No live Foundry validation was required because the slice adds no new live-world read/write authority.
+
 ### Lifecycle Hardening Slice
 
 Status: expanded for the `0.2.7` development slice and hardened again in `0.2.13`.
@@ -158,7 +168,7 @@ Earlier live findings from the `scratch` `0.2.7` validation pass:
 
 ### Milestone 1: Documentation and Manifest Hardening
 
-Status: completed for the `0.2.5` development slice.
+Status: completed for the `0.2.5` development slice and hardened again in `0.2.14`.
 
 Goal: make the bridge surface self-describing enough that tool discovery, docs, tests, and release status cannot drift.
 
@@ -169,11 +179,14 @@ Deliverables:
 - Completed: include per-tool category, risk, read/write flag, trusted-session requirement, input keys, output shape summary, direct MCP exposure, and fallback support.
 - Completed: add README links for the roadmap and capability manifest, plus direct MCP versus `call_bridge_tool` fallback guidance.
 - Completed: add tests that compare registry data, MCP generated schemas, fallback metadata, README references, and the docs manifest.
+- Completed: add `docs/AGENT_QUICKSTART.md`, `get_bridge_quickstart`, MCP resources, and `foundry_bridge_first_contact` so new agents can learn the bridge on first interaction.
+- Completed: add registry/manifest examples for complex fallback, transaction, apply, and lifecycle tool call shapes.
 
 Acceptance:
 
 - Completed: `npm test` fails if a registry tool is missing from MCP discovery, fallback compatibility, or the generated capability manifest.
 - Completed: README links to the v1.0 roadmap and clearly explains when to use direct tools versus `call_bridge_tool`.
+- Completed: tests fail if onboarding resources, prompt exposure, quickstart tool metadata, or complex-tool examples drift from the registry/manifest.
 
 ### Milestone 2: Safer High-Level Read Intelligence
 
