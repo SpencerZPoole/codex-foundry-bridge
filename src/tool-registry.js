@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
-export const BRIDGE_VERSION = "0.2.13";
+export const BRIDGE_VERSION = "0.2.14";
 export const TOOL_REGISTRY_VERSION = 1;
 
 const AnyJson = z.any().optional();
@@ -108,6 +108,27 @@ export const TOOL_DEFINITIONS = [
     ...capabilityMetadata(CATEGORY.diagnostics, "BridgeToolList")
   },
   {
+    name: "get_bridge_quickstart",
+    title: "Get bridge quickstart",
+    description: "Return first-contact onboarding guidance for agents learning this bridge installation.",
+    inputSchema: {
+      format: z.enum(["markdown", "json"]).optional()
+    },
+    risk: "read",
+    requiresTrustedSession: false,
+    examples: [
+      {
+        label: "Agent first contact checklist",
+        args: { format: "json" }
+      },
+      {
+        label: "Markdown quickstart",
+        args: { format: "markdown" }
+      }
+    ],
+    ...capabilityMetadata(CATEGORY.diagnostics, "BridgeQuickstart")
+  },
+  {
     name: "call_bridge_tool",
     title: "Call bridge tool",
     description: "Fallback dispatcher for invoking any registered bridge tool when direct MCP discovery lags.",
@@ -117,6 +138,19 @@ export const TOOL_DEFINITIONS = [
     },
     risk: "meta-dispatch",
     requiresTrustedSession: false,
+    examples: [
+      {
+        label: "Call self-check through fallback",
+        args: { method: "bridge_self_check" }
+      },
+      {
+        label: "Call compendium search through fallback",
+        args: {
+          method: "search_compendium",
+          args: { pack: "D35E.spells", query: "acid arrow", limit: 5 }
+        }
+      }
+    ],
     ...capabilityMetadata(CATEGORY.dispatch, "TargetToolResult", {
       fallbackCallable: false
     })
@@ -410,6 +444,25 @@ export const TOOL_DEFINITIONS = [
     },
     risk: "read",
     requiresTrustedSession: true,
+    examples: [
+      {
+        label: "Create a draft journal entry",
+        args: {
+          action: "create_entry",
+          entryName: "Codex Prep Notes",
+          pages: [{ name: "Overview", content: "<p>Draft notes.</p>" }]
+        }
+      },
+      {
+        label: "Append to an existing page",
+        args: {
+          action: "append_page_section",
+          journalName: "Codex Prep Notes",
+          pageName: "Overview",
+          content: "<p>Additional notes.</p>"
+        }
+      }
+    ],
     ...capabilityMetadata(CATEGORY.transaction, "BridgePlan")
   },
   {
@@ -423,6 +476,19 @@ export const TOOL_DEFINITIONS = [
     },
     risk: "read",
     requiresTrustedSession: true,
+    examples: [
+      {
+        label: "Preview hidden scene marker token",
+        args: {
+          changes: [
+            {
+              action: "create_token",
+              data: { name: "Codex Marker", x: 100, y: 100, hidden: true }
+            }
+          ]
+        }
+      }
+    ],
     ...capabilityMetadata(CATEGORY.transaction, "BridgePlan")
   },
   {
@@ -434,6 +500,20 @@ export const TOOL_DEFINITIONS = [
     },
     risk: "read",
     requiresTrustedSession: true,
+    examples: [
+      {
+        label: "Preview disposable item create",
+        args: {
+          changes: [
+            {
+              action: "create",
+              documentName: "Item",
+              data: { name: "Codex Marker Item", type: "loot" }
+            }
+          ]
+        }
+      }
+    ],
     ...capabilityMetadata(CATEGORY.transaction, "BridgePlan")
   },
   {
@@ -445,6 +525,21 @@ export const TOOL_DEFINITIONS = [
     },
     risk: "read",
     requiresTrustedSession: true,
+    examples: [
+      {
+        label: "Preview GM-only secret check prompt",
+        args: {
+          messages: [
+            {
+              kind: "secret_check_prompt",
+              checkName: "Listen",
+              dc: 15,
+              prompt: "Resolve privately."
+            }
+          ]
+        }
+      }
+    ],
     ...capabilityMetadata(CATEGORY.transaction, "BridgePlan")
   },
   {
@@ -457,6 +552,19 @@ export const TOOL_DEFINITIONS = [
     },
     risk: "write",
     requiresTrustedSession: true,
+    examples: [
+      {
+        label: "Apply a returned preview plan",
+        args: {
+          plan: "<BridgePlan returned by a plan_* tool>",
+          confirmation: {
+            planId: "<plan.planId>",
+            planHash: "<plan.planHash>",
+            worldId: "<plan.worldId>"
+          }
+        }
+      }
+    ],
     ...capabilityMetadata(CATEGORY.transaction, "BridgePlanApplyResult")
   },
   {
@@ -632,6 +740,12 @@ export const TOOL_DEFINITIONS = [
     },
     risk: "dangerous-local-lifecycle",
     requiresTrustedSession: false,
+    examples: [
+      {
+        label: "Restart disposable validation world",
+        args: { worldId: "scratch", dangerous: true }
+      }
+    ],
     ...capabilityMetadata(CATEGORY.lifecycle, "FoundryLifecycleRestartResult")
   },
   {
@@ -670,7 +784,7 @@ export function toolDefinitionByName(name) {
 }
 
 export function publicToolDefinition(tool) {
-  return {
+  const definition = {
     name: tool.name,
     title: tool.title,
     description: tool.description,
@@ -683,6 +797,10 @@ export function publicToolDefinition(tool) {
     fallbackCallable: tool.fallbackCallable,
     inputKeys: Object.keys(tool.inputSchema ?? {}).sort()
   };
+  if (Array.isArray(tool.examples) && tool.examples.length) {
+    definition.examples = tool.examples;
+  }
+  return definition;
 }
 
 export function listBridgeTools() {

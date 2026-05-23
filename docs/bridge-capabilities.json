@@ -1,8 +1,8 @@
 {
-  "bridgeVersion": "0.2.13",
+  "bridgeVersion": "0.2.14",
   "registryVersion": 1,
-  "checksum": "dc6d539ecca023f8c87662b94de9dea04528676fa31e6ce7da3a3f49e17c9184",
-  "toolCount": 47,
+  "checksum": "b7d68c055d6d4ad4777b64066c7731d47b703a0ed7d5a2713bc01935aa51f78f",
+  "toolCount": 48,
   "fallback": {
     "tool": "call_bridge_tool",
     "note": "Use call_bridge_tool when direct MCP discovery lags; the target tool's normal safety gates still apply."
@@ -48,6 +48,35 @@
       "inputKeys": []
     },
     {
+      "name": "get_bridge_quickstart",
+      "title": "Get bridge quickstart",
+      "description": "Return first-contact onboarding guidance for agents learning this bridge installation.",
+      "category": "diagnostics",
+      "outputShape": "BridgeQuickstart",
+      "risk": "read",
+      "readOnly": true,
+      "requiresTrustedSession": false,
+      "directMcpExposure": true,
+      "fallbackCallable": true,
+      "inputKeys": [
+        "format"
+      ],
+      "examples": [
+        {
+          "label": "Agent first contact checklist",
+          "args": {
+            "format": "json"
+          }
+        },
+        {
+          "label": "Markdown quickstart",
+          "args": {
+            "format": "markdown"
+          }
+        }
+      ]
+    },
+    {
       "name": "call_bridge_tool",
       "title": "Call bridge tool",
       "description": "Fallback dispatcher for invoking any registered bridge tool when direct MCP discovery lags.",
@@ -61,6 +90,25 @@
       "inputKeys": [
         "args",
         "method"
+      ],
+      "examples": [
+        {
+          "label": "Call self-check through fallback",
+          "args": {
+            "method": "bridge_self_check"
+          }
+        },
+        {
+          "label": "Call compendium search through fallback",
+          "args": {
+            "method": "search_compendium",
+            "args": {
+              "pack": "D35E.spells",
+              "query": "acid arrow",
+              "limit": 5
+            }
+          }
+        }
       ]
     },
     {
@@ -438,6 +486,30 @@
         "pageName",
         "pageType",
         "pages"
+      ],
+      "examples": [
+        {
+          "label": "Create a draft journal entry",
+          "args": {
+            "action": "create_entry",
+            "entryName": "Codex Prep Notes",
+            "pages": [
+              {
+                "name": "Overview",
+                "content": "<p>Draft notes.</p>"
+              }
+            ]
+          }
+        },
+        {
+          "label": "Append to an existing page",
+          "args": {
+            "action": "append_page_section",
+            "journalName": "Codex Prep Notes",
+            "pageName": "Overview",
+            "content": "<p>Additional notes.</p>"
+          }
+        }
       ]
     },
     {
@@ -455,6 +527,24 @@
         "changes",
         "sceneId",
         "sceneName"
+      ],
+      "examples": [
+        {
+          "label": "Preview hidden scene marker token",
+          "args": {
+            "changes": [
+              {
+                "action": "create_token",
+                "data": {
+                  "name": "Codex Marker",
+                  "x": 100,
+                  "y": 100,
+                  "hidden": true
+                }
+              }
+            ]
+          }
+        }
       ]
     },
     {
@@ -470,6 +560,23 @@
       "fallbackCallable": true,
       "inputKeys": [
         "changes"
+      ],
+      "examples": [
+        {
+          "label": "Preview disposable item create",
+          "args": {
+            "changes": [
+              {
+                "action": "create",
+                "documentName": "Item",
+                "data": {
+                  "name": "Codex Marker Item",
+                  "type": "loot"
+                }
+              }
+            ]
+          }
+        }
       ]
     },
     {
@@ -485,6 +592,21 @@
       "fallbackCallable": true,
       "inputKeys": [
         "messages"
+      ],
+      "examples": [
+        {
+          "label": "Preview GM-only secret check prompt",
+          "args": {
+            "messages": [
+              {
+                "kind": "secret_check_prompt",
+                "checkName": "Listen",
+                "dc": 15,
+                "prompt": "Resolve privately."
+              }
+            ]
+          }
+        }
       ]
     },
     {
@@ -501,6 +623,19 @@
       "inputKeys": [
         "confirmation",
         "plan"
+      ],
+      "examples": [
+        {
+          "label": "Apply a returned preview plan",
+          "args": {
+            "plan": "<BridgePlan returned by a plan_* tool>",
+            "confirmation": {
+              "planId": "<plan.planId>",
+              "planHash": "<plan.planHash>",
+              "worldId": "<plan.worldId>"
+            }
+          }
+        }
       ]
     },
     {
@@ -720,6 +855,15 @@
         "timeouts",
         "visibleCdpPort",
         "worldId"
+      ],
+      "examples": [
+        {
+          "label": "Restart disposable validation world",
+          "args": {
+            "worldId": "scratch",
+            "dangerous": true
+          }
+        }
       ]
     },
     {

@@ -7,6 +7,10 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { buildCapabilityManifest } from "../scripts/generate-capability-manifest.mjs";
 import {
+  BRIDGE_FIRST_CONTACT_PROMPT,
+  BRIDGE_RESOURCE_URIS
+} from "../src/agent-bootstrap.js";
+import {
   BRIDGE_VERSION,
   TOOL_DEFINITIONS,
   publicToolDefinition,
@@ -36,12 +40,22 @@ const chatWorkflowTools = [
   "list_chat_targets",
   "plan_chat_messages"
 ];
+const toolsWithExamples = [
+  "get_bridge_quickstart",
+  "call_bridge_tool",
+  "plan_journal_changes",
+  "plan_scene_changes",
+  "plan_document_changes",
+  "plan_chat_messages",
+  "apply_bridge_plan",
+  "restart_foundry_world"
+];
 
 assert.deepEqual(manifest, generatedManifest);
 assert.equal(manifest.bridgeVersion, BRIDGE_VERSION);
 assert.equal(manifest.checksum, toolRegistryChecksum());
 assert.equal(manifest.toolCount, TOOL_DEFINITIONS.length);
-assert.equal(manifest.toolCount, 47);
+assert.equal(manifest.toolCount, 48);
 assert.equal(manifest.tools.length, TOOL_DEFINITIONS.length);
 assert.deepEqual(
   manifest.tools.map((tool) => tool.name),
@@ -75,6 +89,22 @@ const fallbackTool = manifest.tools.find((tool) => tool.name === "call_bridge_to
 assert.equal(fallbackTool.fallbackCallable, false);
 for (const tool of manifest.tools.filter((entry) => entry.name !== "call_bridge_tool")) {
   assert.equal(tool.fallbackCallable, true, `${tool.name} should be fallback-callable`);
+}
+
+const quickstartTool = manifest.tools.find((tool) => tool.name === "get_bridge_quickstart");
+assert.ok(quickstartTool, "Manifest missing get_bridge_quickstart");
+assert.equal(quickstartTool.category, "diagnostics");
+assert.equal(quickstartTool.risk, "read");
+assert.equal(quickstartTool.readOnly, true);
+assert.equal(quickstartTool.requiresTrustedSession, false);
+assert.equal(quickstartTool.directMcpExposure, true);
+assert.equal(quickstartTool.fallbackCallable, true);
+assert.deepEqual(quickstartTool.inputKeys, ["format"]);
+
+for (const name of toolsWithExamples) {
+  const tool = manifest.tools.find((entry) => entry.name === name);
+  assert.ok(Array.isArray(tool?.examples), `${name} should expose examples`);
+  assert.ok(tool.examples.length > 0, `${name} should have at least one example`);
 }
 
 for (const name of highLevelReadTools) {
@@ -185,6 +215,30 @@ try {
   assert.equal(planChatSchema.type, "array");
   assert.equal(planChatSchema.items.type, "object");
   assert.ok(planChatSchema.items.properties.kind);
+
+  const resources = await client.listResources();
+  const resourceUris = resources.resources.map((resource) => resource.uri).sort();
+  assert.deepEqual(resourceUris, Object.values(BRIDGE_RESOURCE_URIS).sort());
+
+  const quickstartResource = await client.readResource({ uri: BRIDGE_RESOURCE_URIS.quickstart });
+  const quickstartText = quickstartResource.contents[0].text;
+  assert.match(quickstartText, /bridge_self_check/);
+  assert.match(quickstartText, /list_bridge_tools/);
+  assert.match(quickstartText, /call_bridge_tool/);
+
+  const capabilitiesResource = await client.readResource({ uri: BRIDGE_RESOURCE_URIS.capabilities });
+  assert.deepEqual(JSON.parse(capabilitiesResource.contents[0].text), manifest);
+
+  const readmeResource = await client.readResource({ uri: BRIDGE_RESOURCE_URIS.readme });
+  assert.match(readmeResource.contents[0].text, /Agent First Contact/);
+
+  const prompts = await client.listPrompts();
+  assert.ok(prompts.prompts.some((prompt) => prompt.name === BRIDGE_FIRST_CONTACT_PROMPT));
+  const prompt = await client.getPrompt({ name: BRIDGE_FIRST_CONTACT_PROMPT });
+  const promptText = prompt.messages.map((message) => message.content.text).join("\n");
+  assert.match(promptText, /bridge_self_check/);
+  assert.match(promptText, /list_bridge_tools/);
+  assert.match(promptText, /call_bridge_tool/);
 } finally {
   await client.close();
 }
@@ -192,7 +246,9 @@ try {
 const readme = fs.readFileSync(path.join(projectRoot, "README.md"), "utf8");
 assert.match(readme, /docs\/V1_RELEASE_AUDIT_AND_PLAN\.md/);
 assert.match(readme, /docs\/bridge-capabilities\.json/);
+assert.match(readme, /docs\/AGENT_QUICKSTART\.md/);
 assert.match(readme, /call_bridge_tool/);
 assert.match(readme, /direct MCP/i);
+assert.match(readme, /foundry_bridge_first_contact/);
 
 console.log("Manifest parity checks passed.");

@@ -2,7 +2,7 @@
 
 Reviewed: 2026-05-21
 
-Scope: public repository documentation and the local `FoundryCodexBridge 0.2.12` capability surface. This note compares public project positioning, not private implementation details or exhaustive source history.
+Scope: public repository documentation and the local `FoundryCodexBridge 0.2.14` capability surface. This note compares public project positioning, not private implementation details or exhaustive source history.
 
 ## Positioning Summary
 
@@ -32,6 +32,7 @@ The bridge's most distinctive work is operational trust rather than raw API brea
 - **Preview/apply transactions**: `plan_journal_changes`, `plan_scene_changes`, `plan_document_changes`, and `plan_chat_messages` return caller-held `BridgePlan` previews with `planId`, `planHash`, `worldId`, expiration, compact before/after summaries, warnings, and explicit `apply_bridge_plan` confirmation.
 - **Backup-first mutation posture**: destructive document operations create local backups, and transaction updates report backup metadata before mutation.
 - **Self-diagnostics**: `bridge_self_check`, `list_bridge_tools`, registry checksums, capability manifests, direct MCP exposure flags, fallback-callable flags, and runtime summaries make drift and broken readiness visible.
+- **Agent first-contact onboarding**: `get_bridge_quickstart`, MCP resources, and the `foundry_bridge_first_contact` prompt help a new agent learn the bridge before touching live-world tools.
 - **MCP parity fallback**: `call_bridge_tool` keeps registry tools reachable when direct MCP discovery lags, while preserving each target tool's normal gates.
 - **Local lifecycle restart**: `restart_foundry_world` can stop Foundry, relaunch the visible app, launch an explicit world, join as GM, restore a managed bridge GM client, and verify readiness with Windows Credential Manager-backed secrets.
 - **Trusted-world model**: the daemon is localhost-only and token-gated; live-world tools require a trusted GM session; sensitive output is redacted; dangerous script and lifecycle actions require explicit `dangerous=true`.

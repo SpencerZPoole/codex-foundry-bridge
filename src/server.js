@@ -16,6 +16,10 @@ import {
   storeLifecycleCredentials
 } from "./lifecycle.js";
 import {
+  getBridgeQuickstart,
+  registerBridgeOnboarding
+} from "./agent-bootstrap.js";
+import {
   BRIDGE_VERSION,
   TOOL_DEFINITIONS,
   listBridgeTools,
@@ -791,6 +795,7 @@ async function bridgeSelfCheck() {
   if (runtimeEvents?.errors) {
     actions.push("Inspect get_runtime_events for live GM-client errors.");
   }
+  actions.push("For first-contact onboarding, call get_bridge_quickstart and list_bridge_tools before live-world work.");
 
   return {
     ready: Boolean(session && liveSession?.bridge?.version === BRIDGE_VERSION && checks.moduleInstall.exists),
@@ -888,6 +893,8 @@ async function executeTool(method, args = {}) {
       return bridgeSelfCheck();
     case "list_bridge_tools":
       return listBridgeTools();
+    case "get_bridge_quickstart":
+      return getBridgeQuickstart(args);
     case "call_bridge_tool":
       return callBridgeTool(args);
     case "list_collections":
@@ -1192,6 +1199,7 @@ if (!process.argv.includes("--daemon")) {
       async (args) => textResult(await executeTool(tool.name, args ?? {}))
     );
   }
+  registerBridgeOnboarding(server);
 
   async function main() {
     const transport = new StdioServerTransport();

@@ -37,6 +37,7 @@ The MCP adapter and daemon read `CODEX_FOUNDRY_BRIDGE_TOKEN` from the current pr
 - Localhost-only daemon with `CODEX_FOUNDRY_BRIDGE_TOKEN` authentication.
 - Foundry module connects only from GM clients and requires explicit trusted-world authorization.
 - `bridge_self_check` and `list_bridge_tools` report readiness, version, registry, runtime, and tool metadata.
+- `get_bridge_quickstart`, MCP resources, and a first-contact prompt help new agents learn the bridge on first load.
 - `call_bridge_tool` fallback keeps registered tools reachable when direct MCP discovery lags.
 - Read-only world intelligence for compendiums, actors, scenes, world search, readiness audits, and runtime timeline.
 - Preview/apply transactions for journals, scene prep, top-level documents, and chat messages.
@@ -45,10 +46,10 @@ The MCP adapter and daemon read `CODEX_FOUNDRY_BRIDGE_TOKEN` from the current pr
 
 ## Current Status
 
-- Version: `0.2.13`
+- Version: `0.2.14`
 - Foundry compatibility target: Foundry `14`
 - Live validation baseline: Foundry `14.361` with D35E `3.0.2`
-- Registered tools: `47`
+- Registered tools: `48`
 - Default validation world in this repo's workflow: `scratch`
 
 This is active local tooling. Treat it as power-user software: review the safety model, run tests, and start with a disposable Foundry world before pointing it at anything important.
@@ -58,6 +59,7 @@ This is active local tooling. Treat it as power-user software: review the safety
 - `src/server.js` runs the localhost daemon and Foundry WebSocket endpoint.
 - `src/mcp.js` exposes the MCP stdio adapter.
 - `src/tool-registry.js` is the shared tool registry used by MCP, daemon dispatch, docs, and tests.
+- `docs/AGENT_QUICKSTART.md` is the first-contact guide for agents and MCP clients.
 - `module/` is the Foundry module installed into the local Foundry data folder.
 - `docs/bridge-capabilities.json` is generated from the registry.
 - `docs/V1_RELEASE_AUDIT_AND_PLAN.md` tracks the v1.0 roadmap.
@@ -102,6 +104,7 @@ Diagnostics and registry:
 
 - `foundry_status`
 - `bridge_self_check`
+- `get_bridge_quickstart`
 - `list_bridge_tools`
 - `call_bridge_tool`
 
@@ -132,6 +135,34 @@ Operations and maintenance:
 - guarded `restart_foundry_world` lifecycle restart
 
 Use `list_bridge_tools` for the current complete registry, including each tool's category, risk flags, trusted-session requirement, direct MCP exposure, fallback support, and output shape.
+
+## Agent First Contact
+
+New agents should start with:
+
+```json
+{ "method": "bridge_self_check" }
+```
+
+Then inspect the full registry:
+
+```json
+{ "method": "list_bridge_tools" }
+```
+
+For a compact onboarding payload, use:
+
+```json
+{ "method": "get_bridge_quickstart", "args": { "format": "json" } }
+```
+
+MCP clients that support resources can also read:
+
+- `foundry://bridge/quickstart`
+- `foundry://bridge/capabilities`
+- `foundry://bridge/readme`
+
+MCP clients that support prompts can use `foundry_bridge_first_contact`.
 
 ## Capability Manifest
 

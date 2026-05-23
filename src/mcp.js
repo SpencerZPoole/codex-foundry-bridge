@@ -5,6 +5,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { registerBridgeOnboarding } from "./agent-bootstrap.js";
 import { BRIDGE_VERSION, TOOL_DEFINITIONS } from "./tool-registry.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -127,6 +128,7 @@ function registerProxyTool(tool) {
 for (const tool of TOOL_DEFINITIONS) {
   registerProxyTool(tool);
 }
+registerBridgeOnboarding(server);
 
 const transport = new StdioServerTransport();
 await server.connect(transport);

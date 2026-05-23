@@ -1,10 +1,10 @@
 # Foundry Codex Bridge v1.0 Audit + Roadmap
 
-Last verified: 2026-05-21
+Last updated: 2026-05-23
 
 ## Summary
 
-`FoundryCodexBridge` is currently a strong local-only FoundryVTT control bridge, not just a proof of concept. Version `0.2.13` exposes a shared registry of 47 MCP/daemon tools, supports direct MCP discovery plus `call_bridge_tool` fallback dispatch, includes a guarded local Foundry app lifecycle restart workflow for explicit worlds with visible-window and pause-state preservation, adds high-level read-only live-world intelligence, and now supports previewable journal/page, scene token/light/note, typed top-level document, and chat message transactions.
+`FoundryCodexBridge` is currently a strong local-only FoundryVTT control bridge, not just a proof of concept. Version `0.2.14` exposes a shared registry of 48 MCP/daemon tools, supports direct MCP discovery plus `call_bridge_tool` fallback dispatch, includes first-contact agent onboarding resources, includes a guarded local Foundry app lifecycle restart workflow for explicit worlds with visible-window and pause-state preservation, adds high-level read-only live-world intelligence, and supports previewable journal/page, scene token/light/note, typed top-level document, and chat message transactions.
 
 The v1.0 release goal is **Guarded Power**: expand practical live-project ability substantially while preserving the current safety model: localhost daemon, bridge token, trusted GM session gate, redaction, backups before destructive edits, and explicit `dangerous=true` for raw GM script execution.
 
@@ -22,19 +22,20 @@ This suggests a monetizable lane, but not as "just another Foundry MCP." The bes
 
 ### Verified State
 
-- Bridge/package/module version: `0.2.13`
+- Bridge/package/module version: `0.2.14`
+- Latest live validation version: `0.2.13`
 - Registry version: `1`
-- Registry checksum: `dc6d539ecca023f8c87662b94de9dea04528676fa31e6ce7da3a3f49e17c9184`
-- Registered tools: `47`
+- Registry checksum: `b7d68c055d6d4ad4777b64066c7731d47b703a0ed7d5a2713bc01935aa51f78f`
+- Registered tools: `48`
 - Live validation world: `scratch`
 - Live Foundry: `14.362`
 - Live system: `D35E 3.0.2`
 - Live bridge status: `bridge_self_check.ready=true` on `scratch`
-- Live module script version: `0.2.13`
-- Installed module manifest file version: `0.2.13`
+- Latest live module script version: `0.2.13`
+- Latest installed module manifest file version: `0.2.13`
 - Trusted GM sessions: `2` after visible Electron GM login plus managed bridge GM client restart validation
 - Runtime event health: no errors; Foundry deprecation warnings only from compatibility/runtime read paths
-- Current self-check action items: none
+- Latest live `0.2.13` self-check action items: none; `0.2.14` adds a non-blocking onboarding action pointing agents to `get_bridge_quickstart` and `list_bridge_tools`.
 
 Do not use a private production campaign world for validation unless explicitly requested.
 
@@ -44,7 +45,8 @@ The bridge currently provides:
 
 | Category | Tools | Status |
 | --- | --- | --- |
-| Self-diagnostics | `foundry_status`, `bridge_self_check`, `list_bridge_tools` | Good current baseline |
+| Self-diagnostics | `foundry_status`, `bridge_self_check`, `get_bridge_quickstart`, `list_bridge_tools` | Good current baseline; `0.2.14` adds first-contact onboarding |
+| Agent onboarding | MCP resources `foundry://bridge/quickstart`, `foundry://bridge/capabilities`, `foundry://bridge/readme`; prompt `foundry_bridge_first_contact` | Added in `0.2.14`; helps new agents learn the bridge without private prior context |
 | MCP parity fallback | `call_bridge_tool` | Works through daemon and MCP, but direct MCP arg ergonomics need v1 cleanup |
 | Live document reads | `list_collections`, `get_document`, `search_documents`, `list_scenes`, `inspect_scene` | Useful but generic |
 | Compendium reads | `list_compendium_packs`, `search_compendium`, `get_compendium_document` | Strong read-only baseline through live Foundry APIs |
@@ -67,6 +69,7 @@ The bridge currently provides:
 - Uses live Foundry APIs rather than scraping world or compendium storage for normal operation.
 - Preserves a clear security model: localhost only, token-authenticated daemon, GM-only client, trusted-world gate.
 - Uses a shared registry for tool discovery, daemon dispatch, docs, and smoke tests.
+- Provides first-contact agent onboarding through `get_bridge_quickstart`, MCP resources, and an MCP prompt.
 - Provides `call_bridge_tool` fallback when MCP discovery lags.
 - Redacts token-like and sensitive fields in normal outputs.
 - Creates local backups before destructive document and embedded-document deletes.
@@ -89,7 +92,7 @@ The bridge currently provides:
 - There is no rollback browser, restore assistant, or transaction history viewer.
 - There are no permission/profile presets for different operating modes such as read-only, prep, session, maintenance, or dangerous-script-enabled.
 - Lifecycle restart now targets both visible Electron-window GM login and a managed bridge GM client, but this CDP path still needs live hardening across more Foundry/Electron versions.
-- Documentation is good for setup, but sparse for real GM workflows and v1 compatibility guarantees.
+- Documentation is good for setup and first-contact onboarding, but still needs deeper real GM workflow guides and v1 compatibility guarantees.
 
 ## v1.0 Release Target
 
@@ -111,6 +114,14 @@ For v1.0, document and preserve:
 - `dangerous=true` requirement for raw GM script execution
 - `scratch` as the default validation world
 - no implicit validation or mutation of private production campaign worlds
+
+### Agent Discoverability Slice
+
+Status: completed for the `0.2.14` onboarding slice.
+
+The `0.2.14` slice turns the bridge from merely discoverable into first-contact friendly for new agents. It adds `get_bridge_quickstart`, `docs/AGENT_QUICKSTART.md`, MCP resources for the quickstart, capability manifest, and README, plus the `foundry_bridge_first_contact` prompt. It also adds examples for complex dispatch, transaction, apply, and lifecycle tools in the public registry/manifest output.
+
+This slice adds no new live Foundry powers. It changes metadata, docs, and MCP discoverability only. Live-world authority remains governed by localhost transport, token auth, trusted GM sessions, redaction, backup/confirmation behavior, and `dangerous=true` gates.
 
 ### Lifecycle Hardening Slice
 

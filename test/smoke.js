@@ -44,6 +44,7 @@ fs.mkdirSync(path.join(foundryDataDir, "Config"), { recursive: true });
 fs.writeFileSync(path.join(foundryDataDir, "Config", "options.json"), "{}", "utf8");
 assert.equal(new Set(registeredToolNames).size, registeredToolNames.length);
 assert.ok(registeredToolNames.includes("bridge_self_check"));
+assert.ok(registeredToolNames.includes("get_bridge_quickstart"));
 assert.ok(registeredToolNames.includes("call_bridge_tool"));
 assert.ok(registeredToolNames.includes("list_compendium_packs"));
 for (const method of highLevelReadTools) {
@@ -55,7 +56,7 @@ for (const method of transactionTools) {
 for (const method of chatWorkflowTools) {
   assert.ok(registeredToolNames.includes(method), `${method} should be registered`);
 }
-assert.equal(registeredToolNames.length, 47);
+assert.equal(registeredToolNames.length, 48);
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -353,6 +354,13 @@ try {
   );
   assert.equal(toolsCall.body.result.tools.find((tool) => tool.name === "create_document").risk, "write");
   assert.equal(toolsCall.body.result.tools.find((tool) => tool.name === "list_compendium_packs").readOnly, true);
+  const quickstartTool = toolsCall.body.result.tools.find((entry) => entry.name === "get_bridge_quickstart");
+  assert.equal(quickstartTool.category, "diagnostics");
+  assert.equal(quickstartTool.readOnly, true);
+  assert.equal(quickstartTool.requiresTrustedSession, false);
+  assert.equal(quickstartTool.fallbackCallable, true);
+  assert.ok(Array.isArray(quickstartTool.examples));
+  assert.ok(quickstartTool.examples.length > 0);
   for (const method of highLevelReadTools) {
     const tool = toolsCall.body.result.tools.find((entry) => entry.name === method);
     assert.equal(tool.readOnly, true, `${method} should be read-only`);
@@ -427,7 +435,24 @@ try {
   assert.equal(initialSelfCheck.body.result.daemon.trustedSessions, 0);
   assert.equal(initialSelfCheck.body.result.registry.checksum, toolRegistryChecksum());
   assert.equal(initialSelfCheck.body.result.registry.fallback.tool, "call_bridge_tool");
+  assert.ok(initialSelfCheck.body.result.actions.some((action) => action.includes("get_bridge_quickstart")));
   assert.equal(JSON.stringify(initialSelfCheck.body.result).includes(token), false);
+
+  const quickstart = await callBridge("get_bridge_quickstart", { format: "json" });
+  assert.equal(quickstart.body.result.bridgeVersion, BRIDGE_VERSION);
+  assert.equal(quickstart.body.result.registry.checksum, toolRegistryChecksum());
+  assert.ok(quickstart.body.result.firstContact.some((step) => step.includes("bridge_self_check")));
+  assert.ok(quickstart.body.result.firstContact.some((step) => step.includes("list_bridge_tools")));
+  assert.ok(quickstart.body.result.exampleTools.some((tool) => tool.name === "apply_bridge_plan"));
+
+  const quickstartMarkdown = await callBridge("get_bridge_quickstart", { format: "markdown" });
+  assert.match(quickstartMarkdown.body.result, /First Contact Checklist/);
+
+  const quickstartViaFallback = await callBridge("call_bridge_tool", {
+    method: "get_bridge_quickstart",
+    args: { format: "json" }
+  });
+  assert.equal(quickstartViaFallback.body.result.registry.checksum, toolRegistryChecksum());
 
   const selfCheckViaFallback = await callBridge("call_bridge_tool", {
     method: "bridge_self_check"
