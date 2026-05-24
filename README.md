@@ -6,6 +6,10 @@ Foundry Codex Bridge connects AI coding agents to live Foundry VTT worlds withou
 
 The project direction is **Guarded Power**: useful live-world capability with localhost transport, token auth, explicit GM trust, redaction, backups, preview/apply transactions, and `dangerous=true` gates for high-risk workflows.
 
+**Support:** If this bridge helps your local GM workflow, donations are optional and support continued maintenance, live Foundry validation, release packaging, and documentation.
+
+[![Sponsor on GitHub](https://img.shields.io/badge/GitHub%20Sponsors-Donate-ea4aaa?style=flat&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/SpencerZPoole) [![Donate with PayPal](https://img.shields.io/badge/PayPal-One--time%20donation-00457C?style=flat&logo=paypal&logoColor=white)](https://paypal.me/mrpooley92)
+
 ## How It Works
 
 The bridge has four cooperating pieces:
@@ -336,12 +340,3 @@ The helper refuses to run while Foundry is open and backs up `settings.db` first
 ## License
 
 MIT. See [LICENSE](LICENSE).
-
-## Donate
-
-If this project helped your local GM workflow, donations are welcome. GitHub Sponsors is best for recurring sponsorships; PayPal works well for one-time donations.
-
-[![Sponsor on GitHub](https://img.shields.io/badge/GitHub%20Sponsors-Donate-ea4aaa?style=flat&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/SpencerZPoole)
-[![Donate with PayPal](https://img.shields.io/badge/PayPal-One--time%20donation-00457C?style=flat&logo=paypal&logoColor=white)](https://paypal.me/mrpooley92)
-
-The bridge remains local-first, open source, and usable without donations.
